@@ -1,10 +1,10 @@
 ---
 name: vms
-description: 使用 VMS (Vue Mini SFC) 工具开发微信小程序的完整指南。涵盖 Vue 3 Composition API、TypeScript、事件绑定、v-for、v-show、响应式数据、组件通信、插槽等核心用法，以及常见问题和最佳实践。Use when developing WeChat Mini Program with VMS, writing Vue SFC with @vue-mini/core, or debugging template compilation issues.
+description: 使用 VMS (Vue Mini SFC) 工具开发微信小程序的完整指南。涵盖 Vue 3 Composition API、TypeScript、事件绑定、v-for、v-show、响应式数据、组件通信、插槽等核心用法，以及常见问题和最佳实践。Use when developing WeChat Mini Program with VMS, writing Vue SFC with @unmagic/vue-mini, or debugging template compilation issues.
 license: MIT
 metadata:
   author: github.com/unmagic
-  version: '0.1.0'
+  version: '0.0.2'
 ---
 
 # Vue Mini SFC 微信小程序开发指南
@@ -13,13 +13,13 @@ metadata:
 
 **Vue Mini SFC**（简称 **VMS**）允许你使用 Vue 3 `<script setup lang="ts">` 语法开发微信小程序，自动编译为小程序原生代码。
 
-**版本：** 0.1.0 | **仓库：** github.com/unmagic/vms
+**版本：** 0.0.2 | **仓库：** github.com/unmagic/vms
 
 **要求：**
 
 - **必须使用 TypeScript** - SFC 文件必须以 `<script setup lang="ts">` 编写
 - Vue 3 Composition API + `<script setup>`
-- 运行时：`@vue-mini/core >= 1.2.10`
+- 运行时：`@unmagic/vue-mini >= 1.0.0`
 - Node.js >= 22.17.1
 
 **输出：** 微信小程序原生代码（WXML + JS + WXSS + JSON）
@@ -44,7 +44,7 @@ src/
 
 ```bash
 # 安装
-pnpm add -D vms
+pnpm add -D @unmagic/vms
 
 # 开发模式（文件监听 + 增量编译）
 vms dev
@@ -58,10 +58,10 @@ vms build --upload
 
 ## 配置文件
 
-在项目根目录创建 `vms.config.js`（或 `.ts`、`.mjs`），支持 `export default` 或 `export const config = ...` 两种写法：
+在项目根目录创建 `vms.config.js`，支持 `export default` 或 `export const config = ...` 两种写法：
 
 ```js
-// vms.config.js（推荐）
+// vms.config.js
 export default {
   wx: {
     appid: 'your-appid',
@@ -95,11 +95,11 @@ export default {
 
 ### 1. 页面/组件定义
 
-**注意：** 所有 Vue API 必须从 `@vue-mini/core` 导入，不要从 `vue` 导入。
+**注意：** 所有 Vue API 必须从 `@unmagic/vue-mini` 导入，不要从 `vue` 导入。
 
 ```vue
 <script setup lang="ts">
-import { ref, computed, onLoad } from '@vue-mini/core'
+import { ref, computed, onLoad } from '@unmagic/vue-mini'
 
 // 响应式数据
 const count = ref(0)
@@ -258,7 +258,7 @@ const items = ref([{ name: 'Item 1', onClick: () => console.log('clicked') }])
 
 ```vue
 <script setup>
-import { ref, computed, watch } from '@vue-mini/core'
+import { ref, computed, watch } from '@unmagic/vue-mini'
 
 const count = ref(0)                           // ref
 const double = computed(() => count.value * 2)  // computed
@@ -381,7 +381,7 @@ function navigateBack() {
 
 ```vue
 <script setup>
-import { ref, onLoad } from '@vue-mini/core'
+import { ref, onLoad } from '@unmagic/vue-mini'
 
 const data = ref(null)
 
@@ -411,7 +411,7 @@ wx.removeStorageSync('key')
 ```vue
 <!-- 父组件 -->
 <script setup>
-import { ref } from '@vue-mini/core'
+import { ref } from '@unmagic/vue-mini'
 const title = ref('标题')
 const events = ref({
   fun: {
@@ -453,7 +453,7 @@ console.log(id)
 
 ```vue
 <script setup>
-import { onLoad } from '@vue-mini/core'
+import { onLoad } from '@unmagic/vue-mini'
 
 function goToDetail(item) {
   wx.navigateTo({ url: `/pages/detail/DetailIndex?id=${item.id}` })
@@ -467,7 +467,7 @@ onLoad((options) => {
 
 ## 生命周期
 
-**重要：** 所有生命周期都从 `@vue-mini/core` 导入。`<script setup>` 在 `lifetimes.attached` 阶段执行。
+**重要：** 所有生命周期都从 `@unmagic/vue-mini` 导入。`<script setup>` 在 `lifetimes.attached` 阶段执行。
 
 ### 页面组件生命周期
 
@@ -585,7 +585,7 @@ function navigateToDetail() {
 
 ### Q4: 首次渲染前 undefined 导致 TypeError
 
-`@vue-mini/core` 数据初始化时 undefined 值可能导致首次渲染前 WXS 抛出 TypeError。确保响应式数据在使用前有合理的初始值。
+`@unmagic/vue-mini` 数据初始化时 undefined 值可能导致首次渲染前 WXS 抛出 TypeError。确保响应式数据在使用前有合理的初始值。
 
 ## 调试技巧
 
