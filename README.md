@@ -170,6 +170,35 @@ vms dev
 
 编译输出到 `dist/` 目录，可直接使用微信开发者工具打开。
 
+
+## AI 开发助手（Agent Skill）
+
+VMS 项目内置了 AI Skill 文件，可配置到你的 AI 编程助手（如 Qoder、Cursor 等支持 Skill/Rule 的工具）中，让 AI 更准确地理解和生成 VMS 代码。
+
+### 获取 Skill
+
+Skill 文件位于 VMS 仓库的 [`skills/vms/SKILL.md`](https://github.com/unmagic/vms/blob/main/skills/vms/SKILL.md)。
+
+```bash
+# 安装 vms skill
+npx skills add https://github.com/unmagic/vms/blob/main/skills/vms/SKILL.md
+
+```
+
+配置后，AI 助手在协助你在使用 VMS 编写微信小程序项目代码时，会自动遵循 Skill 中的语法规范和最佳实践。
+
+### Skill 内容涵盖
+
+- VMS 基础语法（`<script setup lang="ts">`、事件绑定、`v-for`、`v-show`）
+- 响应式数据（`ref`、`computed`、`watch`）
+- Class / Style 绑定规则
+- 插槽使用与限制
+- 组件通信（函数传递、页面跳转传参）
+- 生命周期对照表
+- 已知限制与替代方案
+- 常见问题和调试技巧
+
+
 ## 已知限制
 
 ### WXS 环境兼容性
