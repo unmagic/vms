@@ -1,0 +1,37 @@
+{
+  "git.confirmSync": false,
+  "editor.defaultFormatter": "oxc.oxc-vscode",
+  "editor.formatOnSave": false,
+  "editor.formatOnSaveMode": "file",
+  "mpDeploy.wechatDevToolsPath": "/Applications/wechatwebdevtools.app/Contents/MacOS/cli",
+  "git.enableSmartCommit": true,
+  "mpDeploy.workspace.include": [
+    "**/package.json"
+  ],
+  "uniapp-run.wxDevtool": "/Applications/wechatwebdevtools.app",
+  "uniapp-run.HBuilderX": "/Applications/HBuilderX.app",
+  "extensions.autoUpdate": "onlyEnabledExtensions",
+  "update.mode": "manual",
+  "oxc.typeAware": true,
+  "gitlens.currentLine.enabled": false,
+  "git.openRepositoryInParentFolders": "never",
+  "trae.notification.enableFeedbackAndSurveys": false,
+  "editor.codeActionsOnSave": {
+    "source.fixAll.oxc": "explicit"
+  },
+  "[jsonc]": {
+    "editor.defaultFormatter": "vscode.json-language-features"
+  },
+  "[javascript]": {
+    "editor.defaultFormatter": "oxc.oxc-vscode",
+    "editor.formatOnSave": true
+  },
+  "[typescript]": {
+    "editor.defaultFormatter": "oxc.oxc-vscode",
+    "editor.formatOnSave": true
+  },
+  "[vue]": {
+    "editor.defaultFormatter": "oxc.oxc-vscode",
+    "editor.formatOnSave": true
+  }
+}

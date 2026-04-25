@@ -1,0 +1,322 @@
+// 提供 WXS 中可用的数组方法
+module.exports = {
+  /**
+   * 查找数组中满足条件的第一个元素
+   */
+  find: function(array, predicate) {
+    if (!array || 'Array' !== array.constructor) return undefined
+    var len = array.length;
+    for (var i = 0; i < len; i++) {
+      if (predicate(array[i], i, array)) {
+        return array[i]
+      }
+    }
+    return undefined
+  },
+
+  /**
+   * 反向迭代数组，查找数组中满足条件的第一个元素
+   */
+  findLast: function(array, predicate) {
+    if (!array || 'Array' !== array.constructor) return undefined
+    for (var i = array.length - 1; i >= 0; i--) {
+      if (predicate(array[i], i, array)) {
+        return array[i]
+      }
+    }
+    return undefined
+  },
+
+  /**
+   * 查找数组中满足条件的第一个元素的索引
+   */
+  findIndex: function(array, predicate) {
+    if (!array || 'Array' !== array.constructor) return -1
+    var len = array.length;
+    for (var i = 0; i < len; i++) {
+      if (predicate(array[i], i, array)) {
+        return i
+      }
+    }
+    return -1
+  },
+
+  /**
+   * 反向迭代数组，查找数组中满足条件的第一个元素的索引
+   */
+  findLastIndex: function(array, predicate) {
+    if (!array || 'Array' !== array.constructor) return -1
+    for (var i = array.length - 1; i >= 0; i--) {
+      if (predicate(array[i], i, array)) {
+        return i
+      }
+    }
+    return -1
+  },
+
+  /**
+   * 将样式对象转换为内联样式字符串
+   */
+  styleToString: function(style) {
+    if (!style) return ''
+    if (typeof style === 'string') return style
+    var result = []
+    var keys = Object.keys(style)
+    for (var i = 0; i < keys.length; i++) {
+      var key = keys[i]
+      var val = style[key]
+      if (val !== undefined && val !== null && val !== '') {
+        // camelCase 转 kebab-case（WXS 不支持正则字面量，手动处理）
+        var kebabKey = ''
+        for (var ci = 0; ci < key.length; ci++) {
+          var ch = key[ci]
+          if (ch >= 'A' && ch <= 'Z') {
+            kebabKey += '-' + ch.toLowerCase()
+          } else {
+            kebabKey += ch
+          }
+        }
+        result.push(kebabKey + ':' + val)
+      }
+    }
+    return result.join(';')
+  },
+
+  /**
+   * 检查数组或字符串中是否包含指定元素
+   */
+  includes: function(target, value, fromIndex) {
+    if (typeof target === 'string') {
+      if (fromIndex) {
+        return target.indexOf(value, fromIndex) > -1
+      }
+      return target.indexOf(value) > -1
+    } else if (!target || 'Array' !== target.constructor) {
+      return false
+    }
+    var len = target.length;
+    for (var i = (fromIndex || 0); i < len; i++) {
+      if (target[i] === value) {
+        return true
+      }
+    }
+    return false
+  },
+
+  // ─── Array methods ───────────────────────────────────────────────────────────
+
+  filter: function(array, predicate) {
+    if (!array || 'Array' !== array.constructor) return []
+    var result = []
+    var len = array.length
+    for (var i = 0; i < len; i++) {
+      if (predicate(array[i], i, array)) {
+        result.push(array[i])
+      }
+    }
+    return result
+  },
+
+  map: function(array, transform) {
+    if (!array || 'Array' !== array.constructor) return []
+    var result = []
+    var len = array.length
+    for (var i = 0; i < len; i++) {
+      result.push(transform(array[i], i, array))
+    }
+    return result
+  },
+
+  reduce: function(array, reducer, initialValue) {
+    if (!array || 'Array' !== array.constructor) return initialValue
+    var acc = initialValue
+    var len = array.length
+    for (var i = 0; i < len; i++) {
+      acc = reducer(acc, array[i], i, array)
+    }
+    return acc
+  },
+
+  reduceRight: function(array, reducer, initialValue) {
+    if (!array || 'Array' !== array.constructor) return initialValue
+    var acc = initialValue
+    for (var i = array.length - 1; i >= 0; i--) {
+      acc = reducer(acc, array[i], i, array)
+    }
+    return acc
+  },
+
+  some: function(array, predicate) {
+    if (!array || 'Array' !== array.constructor) return false
+    var len = array.length
+    for (var i = 0; i < len; i++) {
+      if (predicate(array[i], i, array)) {
+        return true
+      }
+    }
+    return false
+  },
+
+  every: function(array, predicate) {
+    if (!array || 'Array' !== array.constructor) return true
+    var len = array.length
+    for (var i = 0; i < len; i++) {
+      if (!predicate(array[i], i, array)) {
+        return false
+      }
+    }
+    return true
+  },
+
+  flat: function(array, depth) {
+    if (!array || 'Array' !== array.constructor) return []
+    var d = (depth === undefined || depth === null) ? 1 : depth
+    function flatHelper(arr, remaining) {
+      var result = []
+      var len = arr.length
+      for (var i = 0; i < len; i++) {
+        var item = arr[i]
+        if (remaining > 0 && item && 'Array' === item.constructor) {
+          var inner = flatHelper(item, remaining - 1)
+          for (var j = 0; j < inner.length; j++) {
+            result.push(inner[j])
+          }
+        } else {
+          result.push(item)
+        }
+      }
+      return result
+    }
+    return flatHelper(array, d)
+  },
+
+  flatMap: function(array, transform) {
+    if (!array || 'Array' !== array.constructor) return []
+    var mapped = []
+    var len = array.length
+    for (var i = 0; i < len; i++) {
+      mapped.push(transform(array[i], i, array))
+    }
+    var result = []
+    for (var k = 0; k < mapped.length; k++) {
+      var item = mapped[k]
+      if (item && 'Array' === item.constructor) {
+        for (var j = 0; j < item.length; j++) {
+          result.push(item[j])
+        }
+      } else {
+        result.push(item)
+      }
+    }
+    return result
+  },
+
+  at: function(array, index) {
+    if (!array || 'Array' !== array.constructor) return undefined
+    var len = array.length
+    var i = index < 0 ? len + index : index
+    if (i < 0 || i >= len) return undefined
+    return array[i]
+  },
+
+  // ─── String methods ──────────────────────────────────────────────────────────
+
+  padStart: function(str, targetLength, padString) {
+    if (typeof str !== 'string') return ''
+    var pad = (padString === undefined || padString === null) ? ' ' : String(padString)
+    if (pad === '' || str.length >= targetLength) return str
+    var result = str
+    while (result.length < targetLength) {
+      result = pad + result
+    }
+    return result.slice(result.length - targetLength)
+  },
+
+  padEnd: function(str, targetLength, padString) {
+    if (typeof str !== 'string') return ''
+    var pad = (padString === undefined || padString === null) ? ' ' : String(padString)
+    if (pad === '' || str.length >= targetLength) return str
+    var result = str
+    while (result.length < targetLength) {
+      result = result + pad
+    }
+    return result.slice(0, targetLength)
+  },
+
+  /**
+   * 移除字符串开头的空白字符（WXS 不支持正则字面量，手动处理）
+   */
+  trimStart: function(str) {
+    if (typeof str !== 'string') return ''
+    var start = 0
+    while (start < str.length && (str[start] === ' ' || str[start] === '\t' || str[start] === '\n' || str[start] === '\r')) {
+      start++
+    }
+    return str.slice(start)
+  },
+
+  /**
+   * 移除字符串末尾的空白字符（WXS 不支持正则字面量，手动处理）
+   */
+  trimEnd: function(str) {
+    if (typeof str !== 'string') return ''
+    var end = str.length - 1
+    while (end >= 0 && (str[end] === ' ' || str[end] === '\t' || str[end] === '\n' || str[end] === '\r')) {
+      end--
+    }
+    return str.slice(0, end + 1)
+  },
+
+  replaceAll: function(str, searchValue, replaceValue) {
+    if (typeof str !== 'string') return ''
+    return str.split(searchValue).join(replaceValue)
+  },
+
+  // ─── Object static methods ───────────────────────────────────────────────────
+
+  objectEntries: function(obj) {
+    if (obj === null || obj === undefined) return []
+    var keys = Object.keys(obj)
+    var result = []
+    for (var i = 0; i < keys.length; i++) {
+      result.push([keys[i], obj[keys[i]]])
+    }
+    return result
+  },
+
+  objectFromEntries: function(entries) {
+    if (!entries || !entries.length) return {}
+    var result = {}
+    for (var i = 0; i < entries.length; i++) {
+      result[entries[i][0]] = entries[i][1]
+    }
+    return result
+  },
+
+  objectAssign: function(target) {
+    for (var s = 1; s < arguments.length; s++) {
+      var source = arguments[s]
+      if (source === null || source === undefined) continue
+      var keys = Object.keys(source)
+      for (var i = 0; i < keys.length; i++) {
+        target[keys[i]] = source[keys[i]]
+      }
+    }
+    return target
+  },
+
+  // ─── Number static methods ───────────────────────────────────────────────────
+
+  numberIsNaN: function(value) {
+    return value !== value
+  },
+
+  numberIsFinite: function(value) {
+    return typeof value === 'number' && isFinite(value)
+  },
+
+  numberIsInteger: function(value) {
+    return typeof value === 'number' && isFinite(value) && Math.floor(value) === value
+  },
+
+}
