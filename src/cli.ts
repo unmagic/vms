@@ -334,7 +334,7 @@ async function bundleModule(module: string, pkg: string) {
                     })
                     return result?.code ?? generatedCode
                   },
-                  rootPath,
+                  targetDir,
                 )
               } catch (error: unknown) {
                 handleCompileError('', error, fullPath)
