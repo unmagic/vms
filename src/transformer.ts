@@ -1,13 +1,16 @@
 import { parse as parseSFC, type SFCDescriptor } from '@vue/compiler-sfc'
 import { existsSync, readFileSync } from 'node:fs'
-import { basename, dirname, join, relative } from 'node:path'
+import { basename, dirname, join, relative, resolve as pathResolve } from 'node:path'
 import { mkdir, writeFile, stat } from 'node:fs/promises'
 import { createHash } from 'node:crypto'
 import { createReadStream } from 'node:fs'
+import { parse as babelParse } from '@babel/parser'
+import * as t from '@babel/types'
+import { getPackageInfo } from 'local-pkg'
 import { parseStyles } from '@/style'
 import { parseScript, analyzeScriptScope, createEmptyScriptScope } from '@/script'
 import { parseTemplate } from '@/template'
-import type { VueComponentImport } from '@/types/node'
+import type { VueComponentImport, PackageNamedImport } from '@/types/node'
 import { handleCompileError, getErrorMessage } from '@/utils/errorHandler'
 import { deepMerge } from '@/utils/merge'
 import { userConfig } from './utils/constants'
@@ -22,10 +25,103 @@ function resolveComponentPath(importPath: string): string {
   return importPath
 }
 
+// 包入口解析缓存：source -> Map<exportedName, 相对于包 rootPath 的路径（不带 .vue 后缀）>
+const packageExportMapCache = new Map<string, Promise<Map<string, string> | null>>()
+
+/**
+ * 解析某个包入口，收集 `export { default as X } from './xxx.vue'` 这类 re-export
+ * 返回一个 Map：exportedName -> 相对于包 rootPath 的路径（不含 .vue 后缀）
+ */
+async function resolvePackageVueExports(source: string): Promise<Map<string, string> | null> {
+  if (packageExportMapCache.has(source)) {
+    return packageExportMapCache.get(source)!
+  }
+  const promise = (async (): Promise<Map<string, string> | null> => {
+    try {
+      const pkInfo = await getPackageInfo(source)
+      if (!pkInfo) return null
+      const { rootPath, packageJson } = pkInfo
+      if (!rootPath) return null
+
+      // 定位包入口文件
+      const mainField = (packageJson.main as string) || 'index.js'
+      const entryFile = pathResolve(rootPath, mainField)
+      if (!existsSync(entryFile)) return null
+
+      const content = readFileSync(entryFile, 'utf-8')
+      const ast = babelParse(content, {
+        sourceType: 'module',
+        plugins: ['typescript'],
+        errorRecovery: true,
+      })
+
+      const map = new Map<string, string>()
+      for (const node of ast.program.body) {
+        // 形如 export { default as AppEmpty } from './components/AppEmpty.vue'
+        if (
+          t.isExportNamedDeclaration(node) &&
+          node.source &&
+          typeof node.source.value === 'string' &&
+          node.source.value.endsWith('.vue')
+        ) {
+          const relPath = node.source.value // 相对于入口文件所在目录
+          const resolved = pathResolve(dirname(entryFile), relPath)
+          const relFromRoot = relative(rootPath, resolved).replace(/\.vue$/, '')
+          for (const spec of node.specifiers) {
+            if (t.isExportSpecifier(spec) && t.isIdentifier(spec.exported)) {
+              map.set(spec.exported.name, relFromRoot)
+            }
+          }
+        }
+      }
+      return map
+    } catch (error) {
+      console.warn(`⚠️  解析包入口失败 ${source}:`, getErrorMessage(error))
+      return null
+    }
+  })()
+  packageExportMapCache.set(source, promise)
+  return promise
+}
+
+/**
+ * 基于 packageImports 生成 usingComponents：
+ * 对于 re-export 的 .vue 组件，使用 `<pkgName>/<relativePath>` 形式
+ * （可被微信小程序自动解析到 miniprogram_npm 下对应目录）
+ */
+async function resolvePackageUsingComponents(
+  packageImports: PackageNamedImport[],
+): Promise<Record<string, string>> {
+  const result: Record<string, string> = {}
+  // 先按 source 分组，避免重复解析
+  const bySource = new Map<string, PackageNamedImport[]>()
+  for (const imp of packageImports) {
+    const list = bySource.get(imp.source)
+    if (list) list.push(imp)
+    else bySource.set(imp.source, [imp])
+  }
+  await Promise.all(
+    Array.from(bySource.entries()).map(async ([source, imports]) => {
+      const exportMap = await resolvePackageVueExports(source)
+      if (!exportMap) return
+      for (const imp of imports) {
+        const relPath = exportMap.get(imp.imported)
+        if (relPath) {
+          // 形如 @wechat/ui-components/src/components/AppEmpty
+          // 使用 posix 分隔符
+          result[imp.name] = `${source}/${relPath.split(/[\\/]/).join('/')}`
+        }
+      }
+    }),
+  )
+  return result
+}
+
 // 处理组件导入，生成usingComponents配置
 function generateUsingComponents(
   imports: VueComponentImport[],
   thirdPartyComponents: Map<string, string>,
+  packageComponents: Record<string, string>,
 ): Record<string, string> {
   const usingComponents: Record<string, string> = {}
 
@@ -38,6 +134,10 @@ function generateUsingComponents(
     }
   })
   thirdPartyComponents.forEach((value, key) => {
+    usingComponents[key] = value
+  })
+  // package 导入的 Vue 组件（来自 workspace/npm 包的 re-export）
+  Object.entries(packageComponents).forEach(([key, value]) => {
     usingComponents[key] = value
   })
   return usingComponents
@@ -100,11 +200,18 @@ export async function transformVueToMiniProgram(
       await mkdir(componentDir, { recursive: true })
     }
 
+    // 解析 package 导入对应的 Vue 组件（异步、带缓存）
+    const packageComponents = await resolvePackageUsingComponents(result.packageImports ?? [])
+
     // 生成json配置
     const baseJsonConfig: Record<string, unknown> = {
       component: true,
       styleIsolation: 'apply-shared',
-      usingComponents: generateUsingComponents(result.vueComponentImports, thirdPartyComponents),
+      usingComponents: generateUsingComponents(
+        result.vueComponentImports,
+        thirdPartyComponents,
+        packageComponents,
+      ),
     }
     const jsonConfig = result.defineOptionsObject
       ? deepMerge(baseJsonConfig, result.defineOptionsObject)

@@ -339,7 +339,9 @@ async function bundleModule(module: string, pkg: string) {
                 // 转换成功后才删除源 .vue 文件
                 await fs.remove(fullPath)
               } catch (error: unknown) {
-                handleCompileError('', error, fullPath)
+                const errObj = error as Error
+                console.error(`❌ 编译 workspace Vue 组件失败: ${fullPath}`)
+                console.error(errObj?.stack || getErrorMessage(error))
                 if (__PROD__) throw error
               }
             } else if (entry.name.endsWith('.ts')) {
@@ -347,8 +349,9 @@ async function bundleModule(module: string, pkg: string) {
                 const result = await transformFileAsync(fullPath, { ast: true, ...config })
                 if (result) {
                   let code = result.code as string
-                  // 去除 require() 中的 .vue 扩展名
-                  code = code.replace(/require\(['"]([^'"]+?)\.vue['"]\)/g, "require('$1')")
+                  // 去除 require() 中的 .vue 扩展名（re-export 场景：
+                  // require('./components/AppEmpty.vue') -> require('./components/AppEmpty')）
+                  code = code.replace(/require\(\s*['"]([^'"]+?)\.vue['"]\s*\)/g, "require('$1')")
                   if (__PROD__) {
                     code = (await minify(code, terserOptions)).code as string
                   }
@@ -357,7 +360,9 @@ async function bundleModule(module: string, pkg: string) {
                 // 编译成功后才删除源 .ts 文件
                 await fs.remove(fullPath)
               } catch (error: unknown) {
-                handleCompileError('', error, fullPath)
+                const errObj = error as Error
+                console.error(`❌ 编译 workspace TS 文件失败: ${fullPath}`)
+                console.error(errObj?.stack || getErrorMessage(error))
                 if (__PROD__) throw error
               }
             } else if (entry.name.endsWith('.js')) {
@@ -366,14 +371,16 @@ async function bundleModule(module: string, pkg: string) {
                 if (result) {
                   let code = result.code as string
                   // 去除 require() 中的 .vue 扩展名
-                  code = code.replace(/require\(['"]([^'"]+?)\.vue['"]\)/g, "require('$1')")
+                  code = code.replace(/require\(\s*['"]([^'"]+?)\.vue['"]\s*\)/g, "require('$1')")
                   if (__PROD__) {
                     code = (await minify(code, terserOptions)).code as string
                   }
                   await fs.writeFile(fullPath, code)
                 }
               } catch (error: unknown) {
-                handleCompileError('', error, fullPath)
+                const errObj = error as Error
+                console.error(`❌ 编译 workspace JS 文件失败: ${fullPath}`)
+                console.error(errObj?.stack || getErrorMessage(error))
                 if (__PROD__) throw error
               }
             }

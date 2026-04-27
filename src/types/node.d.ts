@@ -134,6 +134,15 @@ type MacroInfoExpression = {
 // 收集的宏信息接口
 type MacroInfo = MacroInfoVariable | MacroInfoExpression
 
+export interface PackageNamedImport {
+  // 本地绑定名（如 AppEmpty）
+  name: string
+  // 源导入名（通常也是 AppEmpty，import { A as B } 时为 A）
+  imported: string
+  // 包名（如 @wechat/ui-components）
+  source: string
+}
+
 export interface VMSSFCContext {
   importAST: t.ImportDeclaration[]
   propsVarName: string
@@ -142,6 +151,8 @@ export interface VMSSFCContext {
   exposeObject: t.ObjectExpression | null
   defineOptionsObject: Record<string, unknown> | null
   vueComponentImports: any[]
+  // 从包（非相对路径）导入的 named import，待解析成 usingComponents
+  packageImports: PackageNamedImport[]
   functionVarsAndDecl: Set<string>
   // 存储解构的props变量与原始属性的映射关系，key对应的是解构的属性名（如果存在别名，则是别名）
   propsVarsMap: Map<string, { defaultValue?: any; originName: string; isDestructured?: boolean }>

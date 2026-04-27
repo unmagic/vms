@@ -19,8 +19,6 @@ import { type SFCDescriptor } from '@vue/compiler-sfc'
 import type { VMSSFCContext } from '@/types/node'
 import { ScriptScope } from '@/types/scope'
 
-
-
 function checkSlotsUsage(templateContent: string | undefined): boolean {
   // 检查模板中是否使用了插槽
   if (!templateContent) {
@@ -33,10 +31,7 @@ function checkSlotsUsage(templateContent: string | undefined): boolean {
  * 确保 @vue-mini/core 中导入了指定的 specifierName。
  * 如果已存在则跳过，否则追加到已有的 @vue-mini/core import 或新建一个。
  */
-function ensureCoreImport(
-  sfcContext: VMSSFCContext,
-  specifierName: string,
-): void {
+function ensureCoreImport(sfcContext: VMSSFCContext, specifierName: string): void {
   const hasImport = sfcContext.importAST.some(
     (importNode) =>
       importNode.source.value === '@vue-mini/core' &&
@@ -111,6 +106,7 @@ async function extractSetupBodyUsingAST(
     exposeObject: null, // 存储expose对象
     defineOptionsObject: null, // 存储defineOptions对象
     vueComponentImports: [], // 存储导入的Vue组件
+    packageImports: [], // 存储从包（非相对路径）导入的 named imports
     functionVarsAndDecl: new Set(), // 存储函数声明或使用const明确定义的函数
     propsVarsMap: isPage
       ? new Map()
@@ -604,6 +600,7 @@ export async function parseScript(
   return {
     script: generate(t.program(programBody)).code,
     vueComponentImports: sfcContext.vueComponentImports,
+    packageImports: sfcContext.packageImports,
     hasSlots,
     sfcContext, // 返回sfcContext
     defineOptionsObject: sfcContext.defineOptionsObject,
