@@ -48,6 +48,7 @@ export async function transformVueToMiniProgram(
   outputDir: string,
   isPage: boolean = false,
   cb: (script: string) => Promise<string>,
+  baseDir?: string,
 ) {
   const vueContent = readFileSync(filePath, 'utf-8')
   const { descriptor } = parseSFC(vueContent, {
@@ -94,7 +95,7 @@ export async function transformVueToMiniProgram(
     const css = parseStyles(styles)
 
     // 5. 生成文件夹
-    const componentDir = join(outputDir, relative(srcDir, dirname(filePath)))
+    const componentDir = join(outputDir, relative(baseDir ?? srcDir, dirname(filePath)))
     if (!existsSync(componentDir)) {
       await mkdir(componentDir, { recursive: true })
     }

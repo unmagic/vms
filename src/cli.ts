@@ -223,6 +223,44 @@ async function findIndependentPackages() {
 
 const builtLibraries: string[] = []
 const bundledModules = new Map<string, Set<string>>()
+
+// 计算目录中所有源码文件的最大 mtime（用于 workspace 包缓存）
+async function computeSourceMaxMtime(dir: string): Promise<number> {
+  let maxMtime = 0
+  const entries = await fs.readdir(dir, { withFileTypes: true })
+  for (const entry of entries) {
+    const fullPath = path.join(dir, entry.name)
+    if (entry.isDirectory()) {
+      if (entry.name === 'node_modules') continue
+      const subMtime = await computeSourceMaxMtime(fullPath)
+      maxMtime = Math.max(maxMtime, subMtime)
+    } else if (/\.(vue|ts|js)$/.test(entry.name)) {
+      const stat = await fs.stat(fullPath)
+      maxMtime = Math.max(maxMtime, stat.mtimeMs)
+    }
+  }
+  return maxMtime
+}
+
+async function readCache(targetDir: string): Promise<{ version?: string; mtime?: number } | null> {
+  const cachePath = path.join(targetDir, '.vms-cache')
+  if (!(await fs.pathExists(cachePath))) return null
+  try {
+    return await fs.readJson(cachePath)
+  } catch {
+    return null
+  }
+}
+
+async function writeCache(
+  targetDir: string,
+  cache: { version?: string; mtime?: number },
+): Promise<void> {
+  const cachePath = path.join(targetDir, '.vms-cache')
+  await fs.ensureDir(targetDir)
+  await fs.writeJson(cachePath, { ...cache, timestamp: Date.now() })
+}
+
 async function bundleModule(module: string, pkg: string) {
   const bundled = bundledModules.get(pkg)
   if (bundled?.has(module) || builtLibraries.some((library) => module.startsWith(library))) {
@@ -236,17 +274,116 @@ async function bundleModule(module: string, pkg: string) {
   const pkInfo = await getPackageInfo(module)
   if (pkInfo) {
     const {
-      packageJson: { peerDependencies },
+      rootPath,
+      packageJson: { peerDependencies, version },
     } = pkInfo
 
-    // 这里判断下，如果module在目标位置已存在，则直接返回true
-    const targetExists = await fs.pathExists(
-      path.resolve(pkg.replace(sourceDir, OUTPUT_DIR), 'miniprogram_npm', module),
-    )
-    if (targetExists) {
+    const targetDir = path.resolve(pkg.replace(sourceDir, OUTPUT_DIR), 'miniprogram_npm', module)
+
+    // 检测是否为 monorepo workspace 包
+    const isWorkspacePackage = rootPath && !rootPath.includes('node_modules')
+
+    // 检查缓存
+    const cache = await readCache(targetDir)
+    if (cache) {
+      if (isWorkspacePackage && cache.mtime) {
+        const currentMtime = await computeSourceMaxMtime(rootPath)
+        if (cache.mtime === currentMtime) {
+          return true
+        }
+      } else if (!isWorkspacePackage && version && cache.version === version) {
+        return true
+      }
+    }
+
+    // 清空旧内容
+    await fs.remove(targetDir)
+    await fs.ensureDir(targetDir)
+
+    if (isWorkspacePackage) {
+      // Workspace 包：优先使用 dist/，否则直接编译源码
+      const distDir = path.join(rootPath, 'dist')
+      const hasDist = await fs.pathExists(distDir)
+
+      if (hasDist) {
+        await fs.copy(distDir, targetDir)
+      } else {
+        // 没有 dist/，复制源码并编译
+        await fs.copy(rootPath, targetDir)
+
+        const processWorkspaceFiles = async (dir: string): Promise<void> => {
+          const entries = await fs.readdir(dir, { withFileTypes: true })
+          for (const entry of entries) {
+            const fullPath = path.join(dir, entry.name)
+            if (entry.isDirectory()) {
+              if (entry.name === 'node_modules') continue
+              await processWorkspaceFiles(fullPath)
+              continue
+            }
+
+            if (entry.name.endsWith('.vue')) {
+              try {
+                await transformVueToMiniProgram(
+                  fullPath,
+                  targetDir,
+                  false,
+                  async (generatedCode) => {
+                    const result = await transformAsync(generatedCode, {
+                      filename: fullPath.replace('.vue', '.js'),
+                      ...config,
+                    })
+                    return result?.code ?? generatedCode
+                  },
+                  rootPath,
+                )
+              } catch (error: unknown) {
+                handleCompileError('', error, fullPath)
+                if (__PROD__) throw error
+              }
+              await fs.remove(fullPath)
+            } else if (entry.name.endsWith('.ts')) {
+              try {
+                const result = await transformFileAsync(fullPath, { ast: true, ...config })
+                if (result) {
+                  let code = result.code as string
+                  if (__PROD__) {
+                    code = (await minify(code, terserOptions)).code as string
+                  }
+                  await fs.writeFile(fullPath.replace(/\.ts$/, '.js'), code)
+                }
+              } catch (error: unknown) {
+                handleCompileError('', error, fullPath)
+                if (__PROD__) throw error
+              }
+              await fs.remove(fullPath)
+            } else if (entry.name.endsWith('.js')) {
+              try {
+                const result = await transformFileAsync(fullPath, { ast: true, ...config })
+                if (result) {
+                  let code = result.code as string
+                  if (__PROD__) {
+                    code = (await minify(code, terserOptions)).code as string
+                  }
+                  await fs.writeFile(fullPath, code)
+                }
+              } catch (error: unknown) {
+                handleCompileError('', error, fullPath)
+                if (__PROD__) throw error
+              }
+            }
+          }
+        }
+
+        await processWorkspaceFiles(targetDir)
+      }
+
+      // 写入 workspace 包缓存（mtime）
+      const currentMtime = await computeSourceMaxMtime(rootPath)
+      await writeCache(targetDir, { mtime: currentMtime })
       return true
     }
 
+    // 普通 npm 包：rollup 打包
     const bundle = await rollup({
       input: module,
       external: peerDependencies ? Object.keys(peerDependencies) : undefined,
@@ -264,9 +401,12 @@ async function bundleModule(module: string, pkg: string) {
     })
     await bundle.write({
       exports: 'named',
-      file: `${pkg.replace(sourceDir, OUTPUT_DIR)}/miniprogram_npm/${module}/index.js`,
+      file: path.join(targetDir, 'index.js'),
       format: 'cjs',
     })
+
+    // 写入 npm 包缓存（version）
+    await writeCache(targetDir, { version })
     return true
   } else {
     console.warn(`未找到 ${module} 的依赖信息`)

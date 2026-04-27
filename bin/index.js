@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { program } from 'commander'
 import { createRequire } from 'module'
-import { runVMS } from '../dist/index.js'
+import { runBuildPackage, runVMS } from '../dist/index.js'
 const require = createRequire(import.meta.url)
 const pkg = require('../package.json')
 
@@ -22,6 +22,14 @@ program
   .description('启动开发服务器')
   .action(() => {
     runVMS({ mode: 'development', upload: false })
+  })
+
+// 组件包构建命令
+program
+  .command('package')
+  .description('构建组件包（在组件包根目录下执行，输出到 dist/）')
+  .action(() => {
+    runBuildPackage()
   })
 
 program.parse()
