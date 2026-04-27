@@ -336,31 +336,37 @@ async function bundleModule(module: string, pkg: string) {
                   },
                   targetDir,
                 )
+                // 转换成功后才删除源 .vue 文件
+                await fs.remove(fullPath)
               } catch (error: unknown) {
                 handleCompileError('', error, fullPath)
                 if (__PROD__) throw error
               }
-              await fs.remove(fullPath)
             } else if (entry.name.endsWith('.ts')) {
               try {
                 const result = await transformFileAsync(fullPath, { ast: true, ...config })
                 if (result) {
                   let code = result.code as string
+                  // 去除 require() 中的 .vue 扩展名
+                  code = code.replace(/require\(['"]([^'"]+?)\.vue['"]\)/g, "require('$1')")
                   if (__PROD__) {
                     code = (await minify(code, terserOptions)).code as string
                   }
                   await fs.writeFile(fullPath.replace(/\.ts$/, '.js'), code)
                 }
+                // 编译成功后才删除源 .ts 文件
+                await fs.remove(fullPath)
               } catch (error: unknown) {
                 handleCompileError('', error, fullPath)
                 if (__PROD__) throw error
               }
-              await fs.remove(fullPath)
             } else if (entry.name.endsWith('.js')) {
               try {
                 const result = await transformFileAsync(fullPath, { ast: true, ...config })
                 if (result) {
                   let code = result.code as string
+                  // 去除 require() 中的 .vue 扩展名
+                  code = code.replace(/require\(['"]([^'"]+?)\.vue['"]\)/g, "require('$1')")
                   if (__PROD__) {
                     code = (await minify(code, terserOptions)).code as string
                   }
