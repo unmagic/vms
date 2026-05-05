@@ -40,7 +40,6 @@ export async function compileVueContent(vueContent: string) {
       undefined,
       false,
       scriptScope,
-      isTemplateOnly,
     )
 
     return {

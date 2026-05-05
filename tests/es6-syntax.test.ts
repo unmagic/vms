@@ -8,7 +8,7 @@ describe('ES6+ 语法支持测试', () => {
   <div @tap="(e = {}) => { console.log(e) }"></div>
 </template>
 <script setup lang="ts">
-import { ref } from '@vue-mini/core'
+import { ref } from '@unmagic/vue-mini'
 const x = ref(0)
 </script>
 `
@@ -23,7 +23,7 @@ const x = ref(0)
   <div @tap="(...args) => { console.log(args) }"></div>
 </template>
 <script setup lang="ts">
-import { ref } from '@vue-mini/core'
+import { ref } from '@unmagic/vue-mini'
 const x = ref(0)
 </script>
 `
@@ -38,7 +38,7 @@ const x = ref(0)
   <div @tap="() => { instance.method() }"></div>
 </template>
 <script setup lang="ts">
-import { ref } from '@vue-mini/core'
+import { ref } from '@unmagic/vue-mini'
 const instance = ref({ method: () => {} })
 </script>
 `
@@ -53,7 +53,7 @@ const instance = ref({ method: () => {} })
   <div @tap="() => { promise.then(v => result = v).catch(e => error = e) }"></div>
 </template>
 <script setup lang="ts">
-import { ref } from '@vue-mini/core'
+import { ref } from '@unmagic/vue-mini'
 const promise = ref(Promise.resolve(1))
 const result = ref(null)
 const error = ref(null)
@@ -72,7 +72,7 @@ const error = ref(null)
   <div @tap="() => { const sym = Symbol('key'); console.log(sym) }"></div>
 </template>
 <script setup lang="ts">
-import { ref } from '@vue-mini/core'
+import { ref } from '@unmagic/vue-mini'
 const x = ref(0)
 </script>
 `
@@ -88,7 +88,7 @@ const x = ref(0)
   <div @tap="() => { myMap.set(key, value); mySet.add(item) }"></div>
 </template>
 <script setup lang="ts">
-import { ref } from '@vue-mini/core'
+import { ref } from '@unmagic/vue-mini'
 const myMap = ref(new Map())
 const mySet = ref(new Set())
 const key = ref('k')

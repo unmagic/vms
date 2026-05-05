@@ -13,7 +13,7 @@ const { descriptor } = parse(vueContent)
 if (descriptor.template && descriptor.scriptSetup) {
   const scriptScope = analyzeScriptScope(descriptor.scriptSetup.content)
 
-  const templateResult = parseTemplate(descriptor.template.ast, 'test.vue', scriptScope)
+  const templateResult = parseTemplate(descriptor.template.ast!, 'test.vue', false, scriptScope)
 
   console.log('Before parseScript:')
   console.log(
@@ -28,6 +28,7 @@ if (descriptor.template && descriptor.scriptSetup) {
     templateResult.internalVars,
     templateResult.renderVars,
     templateResult.needsProxyRefs,
+    false,
     scriptScope,
   )
 

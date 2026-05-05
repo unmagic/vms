@@ -17,7 +17,7 @@ if (scriptMatch) {
 
   console.log('Imports count:', scope.imports.size)
   console.log('Imports:')
-  for (const [name, info] of scope.imports) {
+  for (const [name] of scope.imports) {
     console.log(`  ${name}`)
   }
 

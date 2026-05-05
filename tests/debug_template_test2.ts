@@ -3,7 +3,7 @@ import {
   addRenderProperty,
   collectBindingVarsWithVarName,
 } from '../src/template/tools'
-import { analyzeScriptScope, isImportVariable } from '../src/script/scopeAnalyzer'
+import { analyzeScriptScope } from '../src/script/scopeAnalyzer'
 import * as t from '@babel/types'
 import fs from 'fs'
 

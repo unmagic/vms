@@ -12,7 +12,7 @@ describe('内联事件处理器测试', () => {
 </template>
 
 <script setup lang="ts">
-import { ref } from '@vue-mini/core'
+import { ref } from '@unmagic/vue-mini'
 const canResend = ref(true)
 const showResendModal = ref(false)
 </script>
@@ -38,7 +38,7 @@ const showResendModal = ref(false)
 </template>
 
 <script setup lang="ts">
-import { ref } from '@vue-mini/core'
+import { ref } from '@unmagic/vue-mini'
 const showModal = ref(false)
 const count = ref(0)
 </script>
@@ -59,7 +59,7 @@ const count = ref(0)
 </template>
 
 <script setup lang="ts">
-import { ref } from '@vue-mini/core'
+import { ref } from '@unmagic/vue-mini'
 const showToast = ref(false)
 const toastMessage = ref('')
 </script>
@@ -148,7 +148,7 @@ function handleClick(name: string) {
 </template>
 
 <script setup lang="ts">
-import { ref } from '@vue-mini/core'
+import { ref } from '@unmagic/vue-mini'
 const list = ref([
   { name: '项目1', count: 0, active: true }
 ])
@@ -175,7 +175,7 @@ const list = ref([
 </template>
 
 <script setup lang="ts">
-import { ref } from '@vue-mini/core'
+import { ref } from '@unmagic/vue-mini'
 const list = ref([{ name: '项目1', id: 1, active: true }])
 const selectedId = ref(0)
 </script>
@@ -199,7 +199,7 @@ const selectedId = ref(0)
 </template>
 
 <script setup lang="ts">
-import { ref } from '@vue-mini/core'
+import { ref } from '@unmagic/vue-mini'
 const list = ref([{ name: '项目1', count: 0 }])
 </script>
 `
@@ -219,7 +219,7 @@ const list = ref([{ name: '项目1', count: 0 }])
 </template>
 
 <script setup lang="ts">
-import { ref } from '@vue-mini/core'
+import { ref } from '@unmagic/vue-mini'
 const numbers = ref([1, 2, 3])
 </script>
 `
@@ -239,7 +239,7 @@ const numbers = ref([1, 2, 3])
 </template>
 
 <script setup lang="ts">
-import { ref } from '@vue-mini/core'
+import { ref } from '@unmagic/vue-mini'
 const list = ref([{ name: '项目1' }])
 const newItem = ref({ name: '新项目' })
 </script>
@@ -260,7 +260,7 @@ const newItem = ref({ name: '新项目' })
 </template>
 
 <script setup lang="ts">
-import { ref } from '@vue-mini/core'
+import { ref } from '@unmagic/vue-mini'
 const numbers = ref([1, 2, 3])
 const selectedNum = ref(0)
 </script>
@@ -321,7 +321,7 @@ function onClick() {
 </template>
 
 <script setup lang="ts">
-import { ref } from '@vue-mini/core'
+import { ref } from '@unmagic/vue-mini'
 const name = ref('张三')
 const age = ref(20)
 function onClick(n: string, a: number) {
@@ -347,7 +347,7 @@ function onClick(n: string, a: number) {
 </template>
 
 <script setup lang="ts">
-import { ref } from '@vue-mini/core'
+import { ref } from '@unmagic/vue-mini'
 const status = ref('')
 const isActive = ref(true)
 </script>
@@ -366,7 +366,7 @@ const isActive = ref(true)
 </template>
 
 <script setup lang="ts">
-import { ref } from '@vue-mini/core'
+import { ref } from '@unmagic/vue-mini'
 const isValid = ref(true)
 function handleSubmit() {}
 </script>
@@ -383,7 +383,7 @@ function handleSubmit() {}
 </template>
 
 <script setup lang="ts">
-import { ref } from '@vue-mini/core'
+import { ref } from '@unmagic/vue-mini'
 const message = ref('')
 const userName = ref('张三')
 </script>
@@ -402,7 +402,7 @@ const userName = ref('张三')
 </template>
 
 <script setup lang="ts">
-import { ref } from '@vue-mini/core'
+import { ref } from '@unmagic/vue-mini'
 const result = ref(null)
 const errorMessage = ref('')
 function riskyOperation() { return 'ok' }
@@ -423,7 +423,7 @@ function riskyOperation() { return 'ok' }
 </template>
 
 <script setup lang="ts">
-import { ref } from '@vue-mini/core'
+import { ref } from '@unmagic/vue-mini'
 const items = ref([{ price: 10 }])
 const total = ref(0)
 </script>
@@ -460,7 +460,7 @@ const total = ref(0)
 </template>
 
 <script setup lang="ts">
-import { ref } from '@vue-mini/core'
+import { ref } from '@unmagic/vue-mini'
 const isValid = ref(true)
 function handleSubmit() {}
 </script>
@@ -478,7 +478,7 @@ function handleSubmit() {}
 </template>
 
 <script setup lang="ts">
-import { ref } from '@vue-mini/core'
+import { ref } from '@unmagic/vue-mini'
 const count = ref(0)
 const total = ref(100)
 const amount = ref(10)
@@ -504,7 +504,7 @@ describe('3. v-for 场景测试（续）', () => {
 </template>
 
 <script setup lang="ts">
-import { ref } from '@vue-mini/core'
+import { ref } from '@unmagic/vue-mini'
 const list = ref([
   { 
     children: [{ name: '子项1', count: 0, active: true }],
@@ -537,7 +537,7 @@ describe('4. v-for 优化测试（续）', () => {
 </template>
 
 <script setup lang="ts">
-import { ref } from '@vue-mini/core'
+import { ref } from '@unmagic/vue-mini'
 const list = ref([{ name: '项目1', count: 0 }])
 const newItem = ref({ name: '新项目', count: 0 })
 </script>
@@ -559,7 +559,7 @@ const newItem = ref({ name: '新项目', count: 0 })
 </template>
 
 <script setup lang="ts">
-import { ref } from '@vue-mini/core'
+import { ref } from '@unmagic/vue-mini'
 const list = ref([{ name: '项目1', id: 1, selected: false }])
 const selectedId = ref(1)
 const updateCount = ref(0)
@@ -583,7 +583,7 @@ describe('5. 函数调用测试（续）', () => {
 </template>
 
 <script setup lang="ts">
-import { ref } from '@vue-mini/core'
+import { ref } from '@unmagic/vue-mini'
 const list = ref([{ id: 1 }])
 const name = ref('张三')
 const age = ref(20)
@@ -613,7 +613,7 @@ describe('6. 高级语法测试（续）', () => {
 </template>
 
 <script setup lang="ts">
-import { ref } from '@vue-mini/core'
+import { ref } from '@unmagic/vue-mini'
 const userInfo = ref({ name: '张三', age: 20 })
 const items = ref([1, 2, 3])
 const selectedName = ref('')
@@ -636,7 +636,7 @@ const selectedItem = ref(0)
 </template>
 
 <script setup lang="ts">
-import { ref } from '@vue-mini/core'
+import { ref } from '@unmagic/vue-mini'
 const loading = ref(false)
 const data = ref(null)
 async function fetchData() {
@@ -660,7 +660,7 @@ async function fetchData() {
 </template>
 
 <script setup lang="ts">
-import { ref } from '@vue-mini/core'
+import { ref } from '@unmagic/vue-mini'
 const oldArray = ref([1, 2, 3])
 const newArray = ref([])
 const newItem = ref(4)
@@ -686,7 +686,7 @@ const newValue = ref(2)
 </template>
 
 <script setup lang="ts">
-import { ref } from '@vue-mini/core'
+import { ref } from '@unmagic/vue-mini'
 const user = ref({ profile: { name: '张三' } })
 const data = ref({ items: [1, 2, 3] })
 const value = ref('')
@@ -711,7 +711,7 @@ describe('7. 作用域和变量测试（续）', () => {
 </template>
 
 <script setup lang="ts">
-import { ref } from '@vue-mini/core'
+import { ref } from '@unmagic/vue-mini'
 const items = ref([{ selected: false }])
 const list = ref([{ active: true }])
 const filtered = ref([])
@@ -734,7 +734,7 @@ const filtered = ref([])
 </template>
 
 <script setup lang="ts">
-import { ref } from '@vue-mini/core'
+import { ref } from '@unmagic/vue-mini'
 const list = ref([{ name: '项目1' }])
 const tempItem = ref(null)
 </script>
@@ -756,7 +756,7 @@ const tempItem = ref(null)
 </template>
 
 <script setup lang="ts">
-import { ref } from '@vue-mini/core'
+import { ref } from '@unmagic/vue-mini'
 const list = ref([{ name: '项目1', id: 1 }])
 const tempItem = ref(null)
 </script>
@@ -779,7 +779,7 @@ describe('8. 边界情况测试（续）', () => {
 </template>
 
 <script setup lang="ts">
-import { ref } from '@vue-mini/core'
+import { ref } from '@unmagic/vue-mini'
 const obj = ref({ a: 1, b: 2 })
 const key = ref('a')
 const dynamicKey = ref('b')
@@ -804,7 +804,7 @@ const newValue = ref(3)
 </template>
 
 <script setup lang="ts">
-import { ref } from '@vue-mini/core'
+import { ref } from '@unmagic/vue-mini'
 const list = ref([
   { 
     children: [{ name: '子项1', parent: null }]

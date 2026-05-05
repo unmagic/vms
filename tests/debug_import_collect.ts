@@ -17,7 +17,7 @@ if (descriptor.template && descriptor.scriptSetup) {
     console.log(`  ${name}`)
   }
 
-  const result = parseTemplate(descriptor.template.ast, 'test.vue', scriptScope)
+  const result = parseTemplate(descriptor.template.ast!, 'test.vue', false, scriptScope)
 
   console.log('\nReturn value properties:')
   result.returnValue.properties.forEach((prop: any) => {

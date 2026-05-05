@@ -437,7 +437,7 @@ describe('5.4 Integration tests for expression.ts', () => {
   <view :data-val="arr.filter(x => x > 0)"></view>
 </template>
 <script setup lang="ts">
-import { ref } from '@vue-mini/core'
+import { ref } from '@unmagic/vue-mini'
 const arr = ref([1, -1, 2])
 </script>
 `
@@ -452,7 +452,7 @@ const arr = ref([1, -1, 2])
   <view :data-val="arr.map(x => x * 2)"></view>
 </template>
 <script setup lang="ts">
-import { ref } from '@vue-mini/core'
+import { ref } from '@unmagic/vue-mini'
 const arr = ref([1, 2, 3])
 </script>
 `
@@ -467,7 +467,7 @@ const arr = ref([1, 2, 3])
   <view :data-val="arr.map(String)"></view>
 </template>
 <script setup lang="ts">
-import { ref } from '@vue-mini/core'
+import { ref } from '@unmagic/vue-mini'
 const arr = ref([1, 2, 3])
 </script>
 `
@@ -481,7 +481,7 @@ const arr = ref([1, 2, 3])
   <view :data-val="typeof x"></view>
 </template>
 <script setup lang="ts">
-import { ref } from '@vue-mini/core'
+import { ref } from '@unmagic/vue-mini'
 const x = ref(42)
 </script>
 `

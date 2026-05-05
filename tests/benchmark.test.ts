@@ -55,7 +55,7 @@ describe('Template Transform Benchmark', () => {
       let memoryBefore = 0
       let memoryAfter = 0
 
-      if (typeof performance.memory !== 'undefined') {
+      if (typeof (performance as any).memory !== 'undefined') {
         memoryBefore = (performance as any).memory.usedJSHeapSize
       }
 
@@ -65,7 +65,7 @@ describe('Template Transform Benchmark', () => {
 
       const endTime = performance.now()
 
-      if (typeof performance.memory !== 'undefined') {
+      if (typeof (performance as any).memory !== 'undefined') {
         memoryAfter = (performance as any).memory.usedJSHeapSize
       }
 
@@ -106,7 +106,7 @@ describe('Template Transform Benchmark', () => {
     expect(results.length).toBe(Object.keys(templates).length)
 
     // 确保所有转换都成功
-    for (const [name, template] of Object.entries(templates)) {
+    for (const template of Object.values(templates)) {
       const ast = parse(template, { comments: false })
       const result = parseTemplate(ast, '/test/path')
       expect(result.wxmlContent).toBeDefined()

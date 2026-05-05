@@ -7,15 +7,7 @@
   "env": {
     "builtin": true
   },
-  "ignorePatterns": [
-    "dist/**",
-    "node_modules/**",
-    "*.config.js",
-    "*.config.ts",
-    "example/**",
-    "docs/**",
-    "tests/**"
-  ],
+  "ignorePatterns": ["dist/**", "node_modules/**", "example/**", "docs/**"],
   "rules": {
     "for-direction": "error",
     "no-async-promise-executor": "error",
@@ -129,6 +121,22 @@
           }
         ],
         "no-unused-expressions": "off"
+      }
+    },
+    {
+      "files": ["tests/**/*.ts"],
+      "rules": {
+        "@typescript-eslint/no-explicit-any": "off",
+        "@typescript-eslint/no-unsafe-declaration-merging": "off",
+        "no-unused-vars": "off",
+        "no-unused-expressions": "off"
+      }
+    },
+    {
+      "files": ["*.config.js", "*.config.ts"],
+      "rules": {
+        "@typescript-eslint/no-require-imports": "off",
+        "no-unused-vars": "off"
       }
     }
   ]

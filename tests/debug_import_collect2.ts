@@ -12,7 +12,7 @@ const { descriptor } = parse(vueContent)
 if (descriptor.template && descriptor.scriptSetup) {
   const scriptScope = analyzeScriptScope(descriptor.scriptSetup.content)
 
-  const result = parseTemplate(descriptor.template.ast, 'test.vue', scriptScope)
+  const result = parseTemplate(descriptor.template.ast!, 'test.vue', false, scriptScope)
 
   console.log('needsProxyRefs:', result.needsProxyRefs)
   console.log('bridgedFunctions:', [...result.bridgedFunctions])

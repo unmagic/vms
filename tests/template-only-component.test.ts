@@ -16,7 +16,7 @@ describe('纯模板组件编译测试', () => {
     expect(result.wxml).toContain('纯模板组件')
     expect(result.wxml).toContain('container')
     expect(result.js).toContain('defineComponent')
-    expect(result.js).toContain('@vue-mini/core')
+    expect(result.js).toContain('@unmagic/vue-mini')
   })
 
   it('应该编译带静态内容的纯模板组件', async () => {
