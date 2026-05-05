@@ -608,25 +608,48 @@ export async function parseScript(
 /**
  * 替换函数中的 props 变量访问
  * 将 __vmsProxyRefs.propName 替换为 __vmsProps.propName
- * 使用 Babel 标准 traverse 遍历 AST，只访问有意义的子节点，
- * 避免手写遍历可能导致的性能开销和潜在问题。
+ * 使用 Babel VISITOR_KEYS 进行正确的 AST 遍历，
+ * 只访问有意义的子节点，避免遍历 Babel 内部属性。
  */
 function replacePropsAccessInFunction(
   func: t.FunctionExpression | t.ArrowFunctionExpression,
   propsVarNames: Set<string>,
   propsVarName: string,
 ): void {
-  traverse(func, {
-    MemberExpression(path) {
+  // 使用 Babel VISITOR_KEYS 遍历，只处理有意义的子节点
+  function traverseNode(node: t.Node): void {
+    if (!node || typeof node !== 'object') return
+
+    // 处理 MemberExpression：检查并替换 __vmsProxyRefs.propName
+    if (t.isMemberExpression(node)) {
       if (
-        t.isIdentifier(path.node.object, { name: '__vmsProxyRefs' }) &&
-        t.isIdentifier(path.node.property) &&
-        propsVarNames.has(path.node.property.name)
+        t.isIdentifier(node.object, { name: '__vmsProxyRefs' }) &&
+        t.isIdentifier(node.property) &&
+        propsVarNames.has(node.property.name)
       ) {
-        path.node.object = t.identifier(propsVarName)
+        node.object = t.identifier(propsVarName)
       }
-    },
-  })
+    }
+
+    // 使用 VISITOR_KEYS 获取该节点类型的有效子节点属性名
+    const visitorKeys = t.VISITOR_KEYS[node.type]
+    if (!visitorKeys) return
+
+    for (const key of visitorKeys) {
+      const value = (node as unknown as Record<string, unknown>)[key]
+      if (Array.isArray(value)) {
+        for (const child of value) {
+          if (child && typeof child === 'object' && Object.hasOwn(child, 'type')) {
+            traverseNode(child as t.Node)
+          }
+        }
+      } else if (value && typeof value === 'object' && Object.hasOwn(value, 'type')) {
+        traverseNode(value as t.Node)
+      }
+    }
+  }
+
+  traverseNode(func)
 }
 
 // 导出作用域分析器
