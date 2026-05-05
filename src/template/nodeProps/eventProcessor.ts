@@ -480,340 +480,235 @@ function processArrowFunctionExpression(
       ctx,
       isAsync,
     )
-  } else if (t.isConditionalExpression(body)) {
+  } else if (t.isConditionalExpression(body) || t.isLogicalExpression(body)) {
     // 处理三元表达式：(e) => flag ? a() : b()
-    // 收集条件表达式中使用的外部变量
-    const vForInfoList = getVForInfoList(ctx, node)
-    const vForVars = getVForVariables(ctx, node)
-    const arrowFunctionArgumentNames =
-      arrowFunctionArguments.length > 0
-        ? new Set(
-            arrowFunctionArguments
-              .map((p: any) => (t.isIdentifier(p) ? p.name : ''))
-              .filter(Boolean),
-          )
-        : undefined
-
-    // 收集 test、consequent、alternate 中的外部变量
-    const varsToCollect = new Set<string>()
-    const collectVarsFromNode = (node: t.Node) => {
-      if (t.isIdentifier(node)) {
-        const name = node.name
-        if (
-          name !== EVENT_PARAM_NAME &&
-          name !== '$event' &&
-          !GLOBAL_WHITELIST.has(name) &&
-          !(arrowFunctionArgumentNames && arrowFunctionArgumentNames.has(name)) &&
-          !vForVars.has(name)
-        ) {
-          varsToCollect.add(name)
-        }
-      } else if (t.isMemberExpression(node)) {
-        collectVarsFromNode(node.object)
-      } else if (t.isCallExpression(node)) {
-        collectVarsFromNode(node.callee)
-        node.arguments.forEach((arg) => collectVarsFromNode(arg as t.Node))
-      } else if (t.isConditionalExpression(node)) {
-        collectVarsFromNode(node.test)
-        collectVarsFromNode(node.consequent)
-        collectVarsFromNode(node.alternate)
-      } else if (t.isLogicalExpression(node) || t.isBinaryExpression(node)) {
-        collectVarsFromNode(node.left)
-        collectVarsFromNode(node.right)
-      } else if (t.isUnaryExpression(node)) {
-        collectVarsFromNode(node.argument)
-      }
-    }
-
-    collectVarsFromNode(body.test)
-    collectVarsFromNode(body.consequent)
-    collectVarsFromNode(body.alternate)
-
-    // 将收集的变量添加到 returnValue
-    varsToCollect.forEach((varName) => {
-      if (!shouldSkipVariable(varName, ctx.scriptScope)) {
-        addProperty(returnValue, varName)
-        ctx.internalVars.add(varName)
-      }
-    })
-
-    // 标记需要 __vmsProxyRefs
-    if (varsToCollect.size > 0) {
-      ctx.needsProxyRefs = true
-    }
-
-    // 生成桥接函数
-    const functionName = counter.generateFunctionPropertyName()
-    const dataKey =
-      vForInfoList && vForInfoList.length > 0
-        ? getFunctionIndexChar(counter.nodeDataKeyIndex++)
-        : ''
-
-    // 处理参数
-    const statements: t.Statement[] = []
-    if (arrowFunctionArguments.length > 0) {
-      const param = arrowFunctionArguments[0]
-      if (t.isIdentifier(param) && param.name !== '$event' && param.name !== EVENT_PARAM_NAME) {
-        statements.push(
-          t.variableDeclaration('const', [
-            t.variableDeclarator(
-              param,
-              t.memberExpression(t.identifier(EVENT_PARAM_NAME), t.identifier('detail')),
-            ),
-          ]),
-        )
-      }
-    }
-
-    // 处理 v-for dataset 获取
-    if (vForInfoList && vForInfoList.length > 0) {
-      const indices = vForInfoList.map((info) => getVForIndexName(info) || 'index')
-      const indexVars = indices.map((idx) => t.identifier(idx))
-      statements.push(
-        t.variableDeclaration('const', [
-          t.variableDeclarator(
-            t.objectPattern([
-              t.objectProperty(t.identifier(dataKey), t.arrayPattern(indexVars), false, false),
-            ]),
-            t.memberExpression(
-              t.memberExpression(t.identifier(EVENT_PARAM_NAME), t.identifier('currentTarget')),
-              t.identifier('dataset'),
-            ),
-          ),
-        ]),
-      )
-    }
-
-    // 构建处理后的条件表达式
-    const processConditionalExpr = (expr: t.Expression): t.Expression => {
-      if (t.isIdentifier(expr)) {
-        const name = expr.name
-        if (arrowFunctionArgumentNames && arrowFunctionArgumentNames.has(name)) {
-          return t.memberExpression(t.identifier(EVENT_PARAM_NAME), t.identifier('detail'))
-        }
-        if (ctx.scriptScope?.props.has(name)) {
-          const propsVarName = ctx.scriptScope.propsVarName || '__vmsProps'
-          return t.memberExpression(t.identifier(propsVarName), t.identifier(name))
-        }
-        if (varsToCollect.has(name)) {
-          return t.memberExpression(t.identifier('__vmsProxyRefs'), t.identifier(name))
-        }
-        return expr
-      } else if (t.isMemberExpression(expr)) {
-        return t.memberExpression(
-          processConditionalExpr(expr.object as t.Expression),
-          expr.property,
-          expr.computed,
-        )
-      } else if (t.isCallExpression(expr)) {
-        return t.callExpression(
-          processConditionalExpr(expr.callee as t.Expression),
-          expr.arguments.map((arg) => processConditionalExpr(arg as t.Expression)),
-        )
-      } else if (t.isConditionalExpression(expr)) {
-        return t.conditionalExpression(
-          processConditionalExpr(expr.test),
-          processConditionalExpr(expr.consequent),
-          processConditionalExpr(expr.alternate),
-        )
-      } else if (t.isLogicalExpression(expr)) {
-        return t.logicalExpression(
-          expr.operator,
-          processConditionalExpr(expr.left),
-          processConditionalExpr(expr.right),
-        )
-      } else if (t.isBinaryExpression(expr)) {
-        return t.binaryExpression(
-          expr.operator,
-          processConditionalExpr(expr.left as t.Expression),
-          processConditionalExpr(expr.right as t.Expression),
-        )
-      } else if (t.isUnaryExpression(expr)) {
-        return t.unaryExpression(expr.operator, processConditionalExpr(expr.argument))
-      }
-      return expr
-    }
-
-    const processedBody = processConditionalExpr(body)
-    statements.push(t.returnStatement(processedBody))
-
-    const functionBody = t.blockStatement(statements)
-    const dataArgsAst =
-      vForInfoList && vForInfoList.length > 0
-        ? vForInfoList.map((info: VForInfo) => t.identifier(getVForIndexName(info) || 'index'))
-        : null
-
-    callExpressionWithArgs.set(functionName, {
-      dataKey,
-      dataArgsAst,
-      returnValueBodyAst: functionBody,
-      isAsync,
-    })
-
-    return functionName
-  } else if (t.isLogicalExpression(body)) {
     // 处理逻辑表达式：(e) => flag && onClick(e)
-    // 复用条件表达式的处理逻辑，将逻辑表达式包装为类似条件表达式的处理
     const vForInfoList = getVForInfoList(ctx, node)
     const vForVars = getVForVariables(ctx, node)
-    const arrowFunctionArgumentNames =
-      arrowFunctionArguments.length > 0
-        ? new Set(
-            arrowFunctionArguments
-              .map((p: any) => (t.isIdentifier(p) ? p.name : ''))
-              .filter(Boolean),
-          )
-        : undefined
-
-    // 收集逻辑表达式中使用的外部变量
-    const varsToCollect = new Set<string>()
-    const collectVarsFromNode = (node: t.Node) => {
-      if (t.isIdentifier(node)) {
-        const name = node.name
-        if (
-          name !== EVENT_PARAM_NAME &&
-          name !== '$event' &&
-          !GLOBAL_WHITELIST.has(name) &&
-          !(arrowFunctionArgumentNames && arrowFunctionArgumentNames.has(name)) &&
-          !vForVars.has(name)
-        ) {
-          varsToCollect.add(name)
-        }
-      } else if (t.isMemberExpression(node)) {
-        collectVarsFromNode(node.object)
-      } else if (t.isCallExpression(node)) {
-        collectVarsFromNode(node.callee)
-        node.arguments.forEach((arg) => collectVarsFromNode(arg as t.Node))
-      } else if (t.isLogicalExpression(node) || t.isBinaryExpression(node)) {
-        collectVarsFromNode(node.left)
-        collectVarsFromNode(node.right)
-      } else if (t.isUnaryExpression(node)) {
-        collectVarsFromNode(node.argument)
-      }
-    }
-
-    collectVarsFromNode(body.left)
-    collectVarsFromNode(body.right)
-
-    // 将收集的变量添加到 returnValue
-    varsToCollect.forEach((varName) => {
-      if (!shouldSkipVariable(varName, ctx.scriptScope)) {
-        addProperty(returnValue, varName)
-        ctx.internalVars.add(varName)
-      }
-    })
-
-    // 标记需要 __vmsProxyRefs
-    if (varsToCollect.size > 0) {
-      ctx.needsProxyRefs = true
-    }
-
-    // 生成桥接函数
-    const functionName = counter.generateFunctionPropertyName()
-    const dataKey =
-      vForInfoList && vForInfoList.length > 0
-        ? getFunctionIndexChar(counter.nodeDataKeyIndex++)
-        : ''
-
-    // 处理参数
-    const statements: t.Statement[] = []
-    if (arrowFunctionArguments.length > 0) {
-      const param = arrowFunctionArguments[0]
-      if (t.isIdentifier(param) && param.name !== '$event' && param.name !== EVENT_PARAM_NAME) {
-        statements.push(
-          t.variableDeclaration('const', [
-            t.variableDeclarator(
-              param,
-              t.memberExpression(t.identifier(EVENT_PARAM_NAME), t.identifier('detail')),
-            ),
-          ]),
-        )
-      }
-    }
-
-    // 处理 v-for dataset 获取
-    if (vForInfoList && vForInfoList.length > 0) {
-      const indices = vForInfoList.map((info) => getVForIndexName(info) || 'index')
-      const indexVars = indices.map((idx) => t.identifier(idx))
-      statements.push(
-        t.variableDeclaration('const', [
-          t.variableDeclarator(
-            t.objectPattern([
-              t.objectProperty(t.identifier(dataKey), t.arrayPattern(indexVars), false, false),
-            ]),
-            t.memberExpression(
-              t.memberExpression(t.identifier(EVENT_PARAM_NAME), t.identifier('currentTarget')),
-              t.identifier('dataset'),
-            ),
-          ),
-        ]),
-      )
-    }
-
-    // 构建处理后的逻辑表达式
-    const processLogicalExpr = (expr: t.Expression): t.Expression => {
-      if (t.isIdentifier(expr)) {
-        const name = expr.name
-        if (arrowFunctionArgumentNames && arrowFunctionArgumentNames.has(name)) {
-          return t.memberExpression(t.identifier(EVENT_PARAM_NAME), t.identifier('detail'))
-        }
-        if (ctx.scriptScope?.props.has(name)) {
-          const propsVarName = ctx.scriptScope.propsVarName || '__vmsProps'
-          return t.memberExpression(t.identifier(propsVarName), t.identifier(name))
-        }
-        if (varsToCollect.has(name)) {
-          return t.memberExpression(t.identifier('__vmsProxyRefs'), t.identifier(name))
-        }
-        return expr
-      } else if (t.isMemberExpression(expr)) {
-        return t.memberExpression(
-          processLogicalExpr(expr.object as t.Expression),
-          expr.property,
-          expr.computed,
-        )
-      } else if (t.isCallExpression(expr)) {
-        return t.callExpression(
-          processLogicalExpr(expr.callee as t.Expression),
-          expr.arguments.map((arg) => processLogicalExpr(arg as t.Expression)),
-        )
-      } else if (t.isLogicalExpression(expr)) {
-        return t.logicalExpression(
-          expr.operator,
-          processLogicalExpr(expr.left),
-          processLogicalExpr(expr.right),
-        )
-      } else if (t.isBinaryExpression(expr)) {
-        return t.binaryExpression(
-          expr.operator,
-          processLogicalExpr(expr.left as t.Expression),
-          processLogicalExpr(expr.right as t.Expression),
-        )
-      } else if (t.isUnaryExpression(expr)) {
-        return t.unaryExpression(expr.operator, processLogicalExpr(expr.argument))
-      }
-      return expr
-    }
-
-    const processedBody = processLogicalExpr(body)
-    statements.push(t.returnStatement(processedBody))
-
-    const functionBody = t.blockStatement(statements)
-    const dataArgsAst =
-      vForInfoList && vForInfoList.length > 0
-        ? vForInfoList.map((info: VForInfo) => t.identifier(getVForIndexName(info) || 'index'))
-        : null
-
-    callExpressionWithArgs.set(functionName, {
-      dataKey,
-      dataArgsAst,
-      returnValueBodyAst: functionBody,
+    return createShortExprHandler(
+      body,
+      arrowFunctionArguments,
+      callExpressionWithArgs,
+      vForInfoList,
+      vForVars,
+      ctx,
+      counter,
+      returnValue,
       isAsync,
-    })
-
-    return functionName
+    )
   }
 
   return ''
+}
+
+function collectExternalVarsFromExpression(
+  body: t.ConditionalExpression | t.LogicalExpression,
+  arrowFunctionArgumentNames: Set<string> | undefined,
+  vForVars: Set<string>,
+): Set<string> {
+  const varsToCollect = new Set<string>()
+
+  const collectVarsFromNode = (node: t.Node): void => {
+    if (t.isIdentifier(node)) {
+      const name = node.name
+      if (
+        name !== EVENT_PARAM_NAME &&
+        name !== '$event' &&
+        !GLOBAL_WHITELIST.has(name) &&
+        !(arrowFunctionArgumentNames && arrowFunctionArgumentNames.has(name)) &&
+        !vForVars.has(name)
+      ) {
+        varsToCollect.add(name)
+      }
+    } else if (t.isMemberExpression(node)) {
+      collectVarsFromNode(node.object)
+    } else if (t.isCallExpression(node)) {
+      collectVarsFromNode(node.callee)
+      node.arguments.forEach((arg) => collectVarsFromNode(arg as t.Node))
+    } else if (t.isConditionalExpression(node)) {
+      collectVarsFromNode(node.test)
+      collectVarsFromNode(node.consequent)
+      collectVarsFromNode(node.alternate)
+    } else if (t.isLogicalExpression(node) || t.isBinaryExpression(node)) {
+      collectVarsFromNode(node.left)
+      collectVarsFromNode(node.right)
+    } else if (t.isUnaryExpression(node)) {
+      collectVarsFromNode(node.argument)
+    }
+  }
+
+  // 收集对应表达式类型的节点
+  if (t.isConditionalExpression(body)) {
+    collectVarsFromNode(body.test)
+    collectVarsFromNode(body.consequent)
+    collectVarsFromNode(body.alternate)
+  } else {
+    // LogicalExpression
+    collectVarsFromNode(body.left)
+    collectVarsFromNode(body.right)
+  }
+
+  return varsToCollect
+}
+
+/**
+ * 重写表达式中的变量引用
+ * 将外部变量、props、箭头函数参数替换为正确的访问路径
+ */
+function rewriteExpressionVars(
+  expr: t.Expression,
+  varsToCollect: Set<string>,
+  arrowFunctionArgumentNames: Set<string> | undefined,
+  ctx: VMSTransformContext,
+): t.Expression {
+  const processExpr = (node: t.Expression): t.Expression => {
+    if (t.isIdentifier(node)) {
+      const name = node.name
+      if (arrowFunctionArgumentNames && arrowFunctionArgumentNames.has(name)) {
+        return t.memberExpression(t.identifier(EVENT_PARAM_NAME), t.identifier('detail'))
+      }
+      if (ctx.scriptScope?.props.has(name)) {
+        const propsVarName = ctx.scriptScope.propsVarName || '__vmsProps'
+        return t.memberExpression(t.identifier(propsVarName), t.identifier(name))
+      }
+      if (varsToCollect.has(name)) {
+        return t.memberExpression(t.identifier('__vmsProxyRefs'), t.identifier(name))
+      }
+      return node
+    } else if (t.isMemberExpression(node)) {
+      return t.memberExpression(
+        processExpr(node.object as t.Expression),
+        node.property,
+        node.computed,
+      )
+    } else if (t.isCallExpression(node)) {
+      return t.callExpression(
+        processExpr(node.callee as t.Expression),
+        node.arguments.map((arg) => processExpr(arg as t.Expression)),
+      )
+    } else if (t.isConditionalExpression(node)) {
+      return t.conditionalExpression(
+        processExpr(node.test),
+        processExpr(node.consequent),
+        processExpr(node.alternate),
+      )
+    } else if (t.isLogicalExpression(node)) {
+      return t.logicalExpression(node.operator, processExpr(node.left), processExpr(node.right))
+    } else if (t.isBinaryExpression(node)) {
+      return t.binaryExpression(
+        node.operator,
+        processExpr(node.left as t.Expression),
+        processExpr(node.right as t.Expression),
+      )
+    } else if (t.isUnaryExpression(node)) {
+      return t.unaryExpression(node.operator, processExpr(node.argument))
+    }
+    return node
+  }
+
+  return processExpr(expr)
+}
+
+/**
+ * 创建简短表达式（条件/逻辑表达式）的箭头函数处理器
+ * 供 processArrowFunctionExpression 中条件表达式和逻辑表达式分支复用
+ */
+function createShortExprHandler(
+  body: t.ConditionalExpression | t.LogicalExpression,
+  arrowFunctionArguments: any[],
+  callExpressionWithArgs: Map<string, CallExpressionInfo>,
+  vForInfoList: VForInfo[] | undefined,
+  vForVars: Set<string>,
+  ctx: VMSTransformContext,
+  counter: VMSCounter,
+  returnValue: t.ObjectExpression,
+  isAsync: boolean,
+): string {
+  const arrowFunctionArgumentNames =
+    arrowFunctionArguments.length > 0
+      ? new Set(
+          arrowFunctionArguments.map((p: any) => (t.isIdentifier(p) ? p.name : '')).filter(Boolean),
+        )
+      : undefined
+
+  // 收集外部变量
+  const varsToCollect = collectExternalVarsFromExpression(
+    body,
+    arrowFunctionArgumentNames,
+    vForVars,
+  )
+
+  // 将收集的变量添加到 returnValue
+  varsToCollect.forEach((varName) => {
+    if (!shouldSkipVariable(varName, ctx.scriptScope)) {
+      addProperty(returnValue, varName)
+      ctx.internalVars.add(varName)
+    }
+  })
+
+  // 标记需要 __vmsProxyRefs
+  if (varsToCollect.size > 0) {
+    ctx.needsProxyRefs = true
+  }
+
+  // 生成桥接函数
+  const functionName = counter.generateFunctionPropertyName()
+  const dataKey =
+    vForInfoList && vForInfoList.length > 0 ? getFunctionIndexChar(counter.nodeDataKeyIndex++) : ''
+
+  // 处理参数
+  const statements: t.Statement[] = []
+  if (arrowFunctionArguments.length > 0) {
+    const param = arrowFunctionArguments[0]
+    if (t.isIdentifier(param) && param.name !== '$event' && param.name !== EVENT_PARAM_NAME) {
+      statements.push(
+        t.variableDeclaration('const', [
+          t.variableDeclarator(
+            param,
+            t.memberExpression(t.identifier(EVENT_PARAM_NAME), t.identifier('detail')),
+          ),
+        ]),
+      )
+    }
+  }
+
+  // 处理 v-for dataset 获取
+  if (vForInfoList && vForInfoList.length > 0) {
+    const indices = vForInfoList.map((info) => getVForIndexName(info) || 'index')
+    const indexVars = indices.map((idx) => t.identifier(idx))
+    statements.push(
+      t.variableDeclaration('const', [
+        t.variableDeclarator(
+          t.objectPattern([
+            t.objectProperty(t.identifier(dataKey), t.arrayPattern(indexVars), false, false),
+          ]),
+          t.memberExpression(
+            t.memberExpression(t.identifier(EVENT_PARAM_NAME), t.identifier('currentTarget')),
+            t.identifier('dataset'),
+          ),
+        ),
+      ]),
+    )
+  }
+
+  // 重写表达式中的变量引用
+  const processedBody = rewriteExpressionVars(body, varsToCollect, arrowFunctionArgumentNames, ctx)
+  statements.push(t.returnStatement(processedBody))
+
+  const functionBody = t.blockStatement(statements)
+  const dataArgsAst =
+    vForInfoList && vForInfoList.length > 0
+      ? vForInfoList.map((info: VForInfo) => t.identifier(getVForIndexName(info) || 'index'))
+      : null
+
+  callExpressionWithArgs.set(functionName, {
+    dataKey,
+    dataArgsAst,
+    returnValueBodyAst: functionBody,
+    isAsync,
+  })
+
+  return functionName
 }
 
 /**

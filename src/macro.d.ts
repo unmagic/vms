@@ -1,4 +1,4 @@
-import type { ComponentContext, ShallowRef } from '@vue-mini/core'
+import type { ComponentContext, ShallowRef } from '@unmagic/vue-mini'
 
 type TemplateRef<T = unknown> = Readonly<ShallowRef<T | null>>
 
@@ -12,7 +12,7 @@ declare global {
   function defineContext(): ComponentContext
 
   /**
-   * 定义@vue-mini/core缺少的组件上下文
+   * 定义@unmagic/vue-mini缺少的组件上下文
    * @param key
    */
   function useTemplateRef<T = unknown, Keys extends string = string>(key: Keys): TemplateRef<T>

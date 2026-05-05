@@ -28,13 +28,13 @@ function checkSlotsUsage(templateContent: string | undefined): boolean {
 }
 
 /**
- * 确保 @vue-mini/core 中导入了指定的 specifierName。
- * 如果已存在则跳过，否则追加到已有的 @vue-mini/core import 或新建一个。
+ * 确保 @unmagic/vue-mini 中导入了指定的 specifierName。
+ * 如果已存在则跳过，否则追加到已有的 @unmagic/vue-mini import 或新建一个。
  */
 function ensureCoreImport(sfcContext: VMSSFCContext, specifierName: string): void {
   const hasImport = sfcContext.importAST.some(
     (importNode) =>
-      importNode.source.value === '@vue-mini/core' &&
+      importNode.source.value === '@unmagic/vue-mini' &&
       importNode.specifiers.some(
         (spec) =>
           t.isImportSpecifier(spec) &&
@@ -47,7 +47,7 @@ function ensureCoreImport(sfcContext: VMSSFCContext, specifierName: string): voi
 
   const vueImport = sfcContext.importAST.find(
     (importNode) =>
-      t.isImportDeclaration(importNode) && importNode.source.value === '@vue-mini/core',
+      t.isImportDeclaration(importNode) && importNode.source.value === '@unmagic/vue-mini',
   )
 
   if (vueImport && t.isImportDeclaration(vueImport)) {
@@ -58,7 +58,7 @@ function ensureCoreImport(sfcContext: VMSSFCContext, specifierName: string): voi
     sfcContext.importAST.push(
       t.importDeclaration(
         [t.importSpecifier(t.identifier(specifierName), t.identifier(specifierName))],
-        t.stringLiteral('@vue-mini/core'),
+        t.stringLiteral('@unmagic/vue-mini'),
       ),
     )
   }
@@ -494,7 +494,7 @@ export async function parseScript(
   const programBody: (ImportDeclaration | ExpressionStatement)[] = [
     t.importDeclaration(
       [t.importSpecifier(t.identifier('defineComponent'), t.identifier('defineComponent'))],
-      t.stringLiteral('@vue-mini/core'),
+      t.stringLiteral('@unmagic/vue-mini'),
     ),
     ...sfcContext.importAST,
   ]
