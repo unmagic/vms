@@ -19,8 +19,6 @@ import { type SFCDescriptor } from '@vue/compiler-sfc'
 import type { VMSSFCContext } from '@/types/node'
 import { ScriptScope } from '@/types/scope'
 
-
-
 function checkSlotsUsage(templateContent: string | undefined): boolean {
   // 检查模板中是否使用了插槽
   if (!templateContent) {
@@ -33,10 +31,7 @@ function checkSlotsUsage(templateContent: string | undefined): boolean {
  * 确保 @vue-mini/core 中导入了指定的 specifierName。
  * 如果已存在则跳过，否则追加到已有的 @vue-mini/core import 或新建一个。
  */
-function ensureCoreImport(
-  sfcContext: VMSSFCContext,
-  specifierName: string,
-): void {
+function ensureCoreImport(sfcContext: VMSSFCContext, specifierName: string): void {
   const hasImport = sfcContext.importAST.some(
     (importNode) =>
       importNode.source.value === '@vue-mini/core' &&
@@ -613,47 +608,25 @@ export async function parseScript(
 /**
  * 替换函数中的 props 变量访问
  * 将 __vmsProxyRefs.propName 替换为 __vmsProps.propName
+ * 使用 Babel 标准 traverse 遍历 AST，只访问有意义的子节点，
+ * 避免手写遍历可能导致的性能开销和潜在问题。
  */
 function replacePropsAccessInFunction(
   func: t.FunctionExpression | t.ArrowFunctionExpression,
   propsVarNames: Set<string>,
   propsVarName: string,
 ): void {
-  // 递归遍历函数体中的所有 MemberExpression
-  function traverseNode(node: t.Node): void {
-    if (!node) return
-
-    // 检查当前节点是否是 MemberExpression
-    if (t.isMemberExpression(node)) {
-      // 检查是否是 __vmsProxyRefs.propName 形式
+  traverse(func, {
+    MemberExpression(path) {
       if (
-        t.isIdentifier(node.object, { name: '__vmsProxyRefs' }) &&
-        t.isIdentifier(node.property) &&
-        propsVarNames.has(node.property.name)
+        t.isIdentifier(path.node.object, { name: '__vmsProxyRefs' }) &&
+        t.isIdentifier(path.node.property) &&
+        propsVarNames.has(path.node.property.name)
       ) {
-        // 替换为 __vmsProps.propName
-        node.object = t.identifier(propsVarName)
+        path.node.object = t.identifier(propsVarName)
       }
-    }
-
-    // 递归遍历子节点
-    if (typeof node === 'object') {
-      for (const key in node) {
-        const value = (node as any)[key]
-        if (Array.isArray(value)) {
-          value.forEach((item) => {
-            if (typeof item === 'object' && item !== null) {
-              traverseNode(item)
-            }
-          })
-        } else if (typeof value === 'object' && value !== null && value.type) {
-          traverseNode(value)
-        }
-      }
-    }
-  }
-
-  traverseNode(func)
+    },
+  })
 }
 
 // 导出作用域分析器
