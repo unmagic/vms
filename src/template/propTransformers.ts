@@ -83,6 +83,7 @@ function createResult(
  */
 function parseForVariables(
   prop: VMSAttrOrDirectiveNode,
+  counter: VMSCounter,
 ): { forItem: string; forIndex: string } | undefined {
   const directive = prop as DirectiveNode & { forParseResult: any }
   if (!directive.forParseResult) {
@@ -95,19 +96,10 @@ function parseForVariables(
       : 'item'
 
   const hasExplicitIndex = directive.forParseResult.key?.type === NodeTypes.SIMPLE_EXPRESSION
-  const sourceContent =
-    directive.forParseResult.source?.type === NodeTypes.SIMPLE_EXPRESSION
-      ? (directive.forParseResult.source as any).content
-      : 'item'
 
   const forIndex = hasExplicitIndex
     ? (directive.forParseResult.key as any).content
-    : `_${
-        sourceContent
-          .split('.')
-          .pop()
-          ?.replace(/[^a-zA-Z0-9_]/g, '_') || 'item'
-      }_index`
+    : counter.generateVForIndexName(forItem)
 
   return { forItem, forIndex }
 }
@@ -139,7 +131,7 @@ export function transformVForProp(
     context.ctx,
   )
 
-  const forVars = parseForVariables(prop)
+  const forVars = parseForVariables(prop, context.counter)
   if (!forVars) return undefined
 
   // 写回 forParseResult 供后续使用

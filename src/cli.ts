@@ -43,6 +43,15 @@ let pagePaths: Set<string> | null = null
 const pageComponentCache = new Map<string, boolean>()
 
 /**
+ * 清空所有缓存（在 app.json 变更时调用）
+ */
+function clearAllCaches() {
+  pagePaths = null
+  pageComponentCache.clear()
+  pathCache.clear()
+}
+
+/**
  * 读取 app.json 并生成页面路径列表
  * 页面路径格式: pages/index/Index 或 subHome/pages/home/HomeIndex
  */
@@ -623,6 +632,13 @@ async function dev() {
           }
         })
         .on('change', async (filePath) => {
+          // 如果 app.json 变更，清空所有缓存并重新加载页面路径
+          if (filePath.endsWith('app.json')) {
+            console.log(bold(green('检测到 app.json 变更，清空缓存并重新加载页面路径...')))
+            clearAllCaches()
+            await loadPagePaths()
+          }
+
           // 如果文件正在处理中，标记需要重新处理（排队一次），不直接丢弃
           if (processingFiles.has(filePath)) {
             pendingFiles.add(filePath)

@@ -31,11 +31,7 @@ import {
 import { generate } from '@babel/generator'
 import { getComponentMatcher, WXS_NAMESPACE } from '@/utils/constants'
 import { getPolyfillFileRelativePath } from '@/utils/tools'
-import {
-  propTransformers,
-  mergePropResults,
-  type TransformerContext,
-} from './propTransformers'
+import { propTransformers, mergePropResults, type TransformerContext } from './propTransformers'
 
 function parseTemplate(
   templateAST: RootNode,
@@ -51,11 +47,15 @@ function parseTemplate(
     wxsFunctionCounter: 0,
     functionPropertyCounter: 0,
     nodeDataKeyIndex: 0,
+    vForIndexCounter: 0,
     generateWxsFunctionName() {
       return `__wxs_${this.wxsFunctionCounter++}`
     },
     generateFunctionPropertyName() {
       return `__fun_${this.functionPropertyCounter++}`
+    },
+    generateVForIndexName(forItem: string) {
+      return `_${forItem}_${this.vForIndexCounter++}_index`
     },
   }
 

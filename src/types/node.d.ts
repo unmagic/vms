@@ -113,10 +113,14 @@ export interface VMSCounter {
   functionPropertyCounter: number
   // 节点级别的 dataKey 计数器，每个节点从 0 开始（对应 'a'）
   nodeDataKeyIndex: number
+  // 生成 v-for 默认索引名的计数器，用于避免嵌套 v-for 索引名冲突
+  vForIndexCounter: number
 
   generateWxsFunctionName(): string
 
   generateFunctionPropertyName(): string
+
+  generateVForIndexName(forItem: string): string
 }
 
 type MacroInfoVariable = {
