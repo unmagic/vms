@@ -102,7 +102,7 @@ export async function transformVueToMiniProgram(
     // 生成json配置
     const baseJsonConfig: Record<string, unknown> = {
       component: true,
-      styleIsolation: 'apply-shared',
+      styleIsolation: isPage ? 'shared' : 'apply-shared',
       usingComponents: generateUsingComponents(result.vueComponentImports, thirdPartyComponents),
     }
     const jsonConfig = result.defineOptionsObject
