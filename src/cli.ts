@@ -173,26 +173,54 @@ const IGNORED_FILES = (file: string, stats?: fs.Stats) => {
   )
 }
 
-// 并行处理配置：根据 CPU 核心数动态设置，至少为 4
-const CONCURRENT_LIMIT = Math.max(4, os.cpus().length - 1)
+// 并行处理配置：I/O 密集型任务可以使用更高并发
+const CONCURRENT_LIMIT = Math.max(4, os.cpus().length * 2 - 1)
 
-// 批量并行处理函数
+// 真正的并发池实现（而非批处理）
 async function batchProcess<T>(
   items: T[],
   processor: (item: T) => Promise<void>,
   concurrency: number = CONCURRENT_LIMIT,
 ): Promise<void> {
-  // 将 items 分成多个批次，每批并发处理
-  for (let i = 0; i < items.length; i += concurrency) {
-    const batch = items.slice(i, i + concurrency)
-    await Promise.all(
-      batch.map((item) =>
-        processor(item).catch((error) => {
-          console.error(`处理失败:`, error)
-        }),
-      ),
-    )
-  }
+  if (items.length === 0) return
+
+  let index = 0
+  let running = 0
+  let completed = 0
+  const total = items.length
+  let hasError = false
+
+  return new Promise((resolve, reject) => {
+    const runNext = async () => {
+      // 启动新的任务，直到达到并发上限或所有任务都已启动
+      while (index < total && running < concurrency && !hasError) {
+        const currentIndex = index++
+        running++
+
+        processor(items[currentIndex])
+          .catch((error) => {
+            console.error(`处理失败 [${items[currentIndex]}]:`, error)
+          })
+          .finally(() => {
+            running--
+            completed++
+
+            if (completed === total) {
+              if (hasError) {
+                reject(new Error('部分任务处理失败'))
+              } else {
+                resolve()
+              }
+            } else if (!hasError) {
+              // 继续启动下一个任务
+              runNext()
+            }
+          })
+      }
+    }
+
+    runNext()
+  })
 }
 
 // 路径转换缓存 - 避免重复计算
@@ -366,9 +394,13 @@ async function buildComponentLibrary(name: string) {
         }
       }
 
-      // 并行处理所有 .js 文件
-      await Promise.all(
-        jsFiles.map(async (filePath) => {
+      // 使用并发池处理所有 .js 文件（限制并发避免内存耗尽）
+      const jsConcurrency = Math.min(10, CONCURRENT_LIMIT)
+      console.log(bold(green(`  处理 ${jsFiles.length} 个 JS 文件（并发=${jsConcurrency}）...`)))
+
+      await batchProcess(
+        jsFiles,
+        async (filePath) => {
           try {
             const result = await transformFileAsync(filePath, { ast: true, ...config })
             if (result) {
@@ -383,7 +415,8 @@ async function buildComponentLibrary(name: string) {
           } catch (error: unknown) {
             console.error(`处理 ${filePath} 失败:`, getErrorMessage(error))
           }
-        }),
+        },
+        jsConcurrency,
       )
     }
 
@@ -412,7 +445,12 @@ async function scanDependencies() {
     if (dependencies) {
       // 并行处理所有依赖，提高启动速度
       const depNames = Object.keys(dependencies)
-      console.log(bold(green(`扫描到 ${depNames.length} 个依赖，开始并行处理...`)))
+
+      // 根据系统资源动态调整依赖处理的并发数
+      const depConcurrency = Math.min(5, Math.max(2, Math.ceil(os.cpus().length / 2)))
+      console.log(
+        bold(green(`扫描到 ${depNames.length} 个依赖，开始并行处理（并发=${depConcurrency}）...`)),
+      )
       const startDepTime = Date.now()
 
       // 使用批量并行处理依赖
@@ -421,8 +459,8 @@ async function scanDependencies() {
         async (name) => {
           await buildComponentLibrary(name)
         },
-        5,
-      ) // 依赖构建限制为 5 个并发，避免过多资源占用
+        depConcurrency,
+      )
 
       console.log(bold(green(`依赖处理完成，耗时：${Date.now() - startDepTime}ms`)))
     }
@@ -439,7 +477,7 @@ async function dealScriptCode(filePath: string, result: BabelFileResult) {
   let code = result.code as string
 
   // 使用缓存避免重复 path.normalize 计算
-  let pkg = independentPackages.find((item) => {
+  const pkg = independentPackages.find((item) => {
     let normalized = normalizedPkgPaths.get(item)
     if (!normalized) {
       normalized = path.normalize(`${sourceDir}/${item}`)
