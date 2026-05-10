@@ -1,10 +1,13 @@
 /**
  * 全局变量白名单
  * 这些变量不会被收集到 __vmsRenderState 或 __vmsInternalState
+ *
+ * 仅包含微信小程序运行时实际存在的全局标识符，
+ * 不包含任何 Web / DOM / Node.js 专属 API。
  */
 
 export const GLOBAL_WHITELIST = new Set([
-  // 小程序全局
+  // 微信小程序运行时全局
   'wx',
   'getApp',
   'getCurrentPages',
@@ -12,7 +15,7 @@ export const GLOBAL_WHITELIST = new Set([
   'Component',
   'App',
 
-  // JS 全局对象
+  // ECMAScript 内置对象（所有现代 JS 引擎均支持）
   'console',
   'Math',
   'Date',
@@ -34,9 +37,8 @@ export const GLOBAL_WHITELIST = new Set([
   'Proxy',
   'Reflect',
   'Intl',
-  'Buffer', // Node.js
 
-  // 特殊值
+  // 特殊值字面量（解析表达式时以标识符形式出现）
   'undefined',
   'null',
   'true',
@@ -45,7 +47,7 @@ export const GLOBAL_WHITELIST = new Set([
   'Infinity',
   '-Infinity',
 
-  // 全局函数
+  // ECMAScript 内置函数
   'parseInt',
   'parseFloat',
   'isNaN',
@@ -57,6 +59,8 @@ export const GLOBAL_WHITELIST = new Set([
   'escape',
   'unescape',
   'eval',
+
+  // 定时器（微信小程序支持）
   'setTimeout',
   'setInterval',
   'clearTimeout',
@@ -64,7 +68,7 @@ export const GLOBAL_WHITELIST = new Set([
   'requestAnimationFrame',
   'cancelAnimationFrame',
 
-  // 构造函数
+  // ECMAScript TypedArray 构造函数
   'ArrayBuffer',
   'SharedArrayBuffer',
   'DataView',
@@ -78,56 +82,13 @@ export const GLOBAL_WHITELIST = new Set([
   'Uint32Array',
   'Uint8ClampedArray',
 
-  // URL API
+  // URL 标准（现代 JS 引擎均支持）
   'URL',
   'URLSearchParams',
 
-  // Fetch API
-  'fetch',
-  'Headers',
-  'Request',
-  'Response',
-
-  // WebSocket
-  'WebSocket',
-
-  // EventSource
-  'EventSource',
-
-  // Storage
-  'localStorage',
-  'sessionStorage',
-
-  // Crypto
-  'crypto',
-  'Crypto',
-  'SubtleCrypto',
-
-  // TextEncoder/Decoder
+  // 文本编码（现代 JS 引擎均支持）
   'TextEncoder',
   'TextDecoder',
-
-  // AbortController
-  'AbortController',
-  'AbortSignal',
-
-  // Image
-  'Image',
-
-  // File API
-  'File',
-  'FileReader',
-  'Blob',
-  'FormData',
-
-  // Worker
-  'Worker',
-
-  // Performance
-  'performance',
-
-  // Console
-  'console',
 ])
 
 /**

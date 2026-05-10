@@ -16,6 +16,7 @@ import fs from 'fs-extra'
 import { bold, green } from 'kolorist'
 import { getPackageInfo } from 'local-pkg'
 import path from 'node:path'
+import os from 'node:os'
 import process from 'node:process'
 import { rollup } from 'rollup'
 import { minify } from 'terser'
@@ -181,10 +182,8 @@ const IGNORED_FILES = (file: string, stats?: fs.Stats) => {
   )
 }
 
-// 并行处理配置
-const CONCURRENT_LIMIT = 5 // 同时处理的文件数量限制
-// 开发模式使用更高并发（默认 5，可根据 CPU 核心数调整）
-const DEV_CONCURRENT_LIMIT = 5
+// 并行处理配置：根据 CPU 核心数动态设置，至少为 4
+const CONCURRENT_LIMIT = Math.max(4, os.cpus().length - 1)
 
 // 批量并行处理函数
 async function batchProcess<T>(
@@ -719,13 +718,11 @@ async function dev() {
           if (initialFiles.length > 0) {
             console.log(
               bold(
-                green(
-                  `开始并行处理 ${initialFiles.length} 个文件（并发=${DEV_CONCURRENT_LIMIT}）...`,
-                ),
+                green(`开始并行处理 ${initialFiles.length} 个文件（并发=${CONCURRENT_LIMIT}）...`),
               ),
             )
             const processStartTime = Date.now()
-            await batchProcess(initialFiles, fileProcessor, DEV_CONCURRENT_LIMIT)
+            await batchProcess(initialFiles, fileProcessor, CONCURRENT_LIMIT)
             console.log(
               bold(
                 green(

@@ -6,26 +6,6 @@ import { ComponentMatcher } from '@/utils/componentMatcher'
 
 export const __IS_PROD__ = process.env.NODE_ENV === 'production'
 
-// 保留可能在模板作用域中的其他变量（排除JavaScript内置对象）
-export const JS_BUILT_IN_SET = new Set([
-  'Math',
-  'Date',
-  'Object',
-  'undefined',
-  'JSON',
-  'console',
-  'NaN',
-  'Infinity',
-  'parseInt',
-  'parseFloat',
-  'isNaN',
-  'isFinite',
-  'decodeURI',
-  'decodeURIComponent',
-  'encodeURI',
-  'encodeURIComponent',
-])
-
 const userConfig = await loadUserConfig()
 if (!userConfig.wx) {
   throw new Error('请在vms.config.*s中配置完整的wx')

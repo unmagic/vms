@@ -1,7 +1,7 @@
 // 检查表达式是否包含父级v-for的变量
 import { parseExpression } from '@babel/parser'
 import t, { Node } from '@babel/types'
-import { JS_BUILT_IN_SET } from '@/utils/constants'
+import { GLOBAL_WHITELIST } from '@/utils/globalWhitelist'
 import { getErrorMessage } from '@/utils/errorHandler'
 
 /**
@@ -21,115 +21,13 @@ export function getIdentifiersWithoutVForVariables(ast: Node, vForVars: Set<stri
   try {
     // 收集所有标识符
     const identifiers = new Set<string>()
-    traverse(ast, identifiers)
+    collectVariablesFromAST(ast, identifiers)
     vForVars.forEach((vForVar) => identifiers.delete(vForVar))
     return identifiers
   } catch (error: unknown) {
     // 如果解析失败，返回空集合
     console.error(`❌ 解析表达式时出错: ${getErrorMessage(error)}`)
     return new Set()
-  }
-}
-
-// 遍历AST节点，收集标识符
-function traverse(node: Node, identifiers: Set<string>): void {
-  if (!node) return
-  // 处理不同类型的节点
-  switch (node.type) {
-    case 'Identifier':
-      identifiers.add(node.name)
-      break
-    case 'MemberExpression':
-      if (node.object) {
-        if (node.object.type === 'Identifier') {
-          identifiers.add(node.object.name)
-        } else if (node.object.type === 'MemberExpression') {
-          traverse(node.object, identifiers)
-        }
-      }
-      if (node.property && node.property.type === 'Identifier' && !node.computed) {
-        // 对于点号访问的属性（如 obj.prop），我们通常不把 prop 当作变量
-        // 但需要考虑计算属性访问（如 obj[prop]）的情况
-      } else if (node.property && node.computed) {
-        traverse(node.property, identifiers)
-      }
-      break
-    case 'ConditionalExpression':
-      ;[node.test, node.consequent, node.alternate].forEach((item) => traverse(item, identifiers))
-      break
-    case 'UnaryExpression':
-      traverse(node.argument, identifiers)
-      break
-    case 'BinaryExpression':
-    case 'LogicalExpression':
-      traverse(node.left, identifiers)
-      traverse(node.right, identifiers)
-      break
-    case 'CallExpression':
-      // 处理函数调用表达式
-      if (node.callee) {
-        traverse(node.callee, identifiers)
-      }
-      if (node.arguments) {
-        node.arguments.forEach((arg: any) => traverse(arg, identifiers))
-      }
-      break
-    case 'ArrayExpression':
-      // 处理数组表达式
-      if (node.elements) {
-        node.elements.forEach((element: any) => traverse(element, identifiers))
-      }
-      break
-    case 'ObjectExpression':
-      // 处理对象表达式
-      if (node.properties) {
-        node.properties.forEach((property: any) => {
-          if (property.type === 'ObjectProperty') {
-            // 对于对象属性，我们通常只关心值，不关心键（除非是计算属性键）
-            if (property.computed) {
-              traverse(property.key, identifiers)
-            }
-            traverse(property.value, identifiers)
-          } else if (property.type === 'ObjectMethod') {
-            // 对于对象方法，处理方法体内的标识符
-            if (property.body) {
-              traverse(property.body, identifiers)
-            }
-          } else if (property.type === 'SpreadElement') {
-            // 处理展开运算符
-            traverse(property.argument, identifiers)
-          }
-        })
-      }
-      break
-    case 'AssignmentExpression':
-      // 处理赋值表达式
-      traverse(node.left, identifiers)
-      traverse(node.right, identifiers)
-      break
-    case 'UpdateExpression':
-      // 处理自增/自减表达式
-      traverse(node.argument, identifiers)
-      break
-    case 'NewExpression':
-      // 处理 new 表达式
-      if (node.callee) {
-        traverse(node.callee, identifiers)
-      }
-      if (node.arguments) {
-        node.arguments.forEach((arg: any) => traverse(arg, identifiers))
-      }
-      break
-    // TypeScript 特有节点类型
-    case 'TSAsExpression':
-    case 'TSTypeAssertion':
-      // 处理 TypeScript 的 as 和 <Type> 断言语法
-      traverse(node.expression, identifiers)
-      break
-    case 'TSNonNullExpression':
-      // 处理 TypeScript 的非空断言操作符 (expr!)
-      traverse(node.expression, identifiers)
-      break
   }
 }
 
@@ -375,7 +273,7 @@ export function extractVariablesFromExpressionAST(ast: any): string[] {
   try {
     const variables = new Set<string>()
     collectVariablesFromAST(ast, variables)
-    JS_BUILT_IN_SET.forEach((builtIn) => variables.delete(builtIn))
+    GLOBAL_WHITELIST.forEach((builtIn) => variables.delete(builtIn))
     return Array.from(variables)
   } catch (e) {
     console.warn('Failed to extract variables from expression:', ast.loc?.source, e)
@@ -399,7 +297,7 @@ export function isExpressionContainsVForVariables(expression: string, parentVFor
     // 收集所有标识符
     const identifiers = new Set<string>()
 
-    traverse(ast, identifiers)
+    collectVariablesFromAST(ast, identifiers)
     // 检查是否有与v-for变量同名的标识符
     return (
       identifiers.has(parentVFor.vForItemName) ||
