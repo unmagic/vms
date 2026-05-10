@@ -23,7 +23,7 @@
     "vms": "bin/index.js"
   },
   "scripts": {
-    "example:dev": "npm run vms:build && cd example && npm run dev",
+    "example:dev": "cd example && npm run dev",
     "example:build": "cd example && npm run build",
     "example:inspect": "cd example && npm run inspect:vms",
     "vms:build": "rolldown --config rolldown.config.js",
