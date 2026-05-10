@@ -7,10 +7,7 @@ import { handleCompileError, getErrorMessage } from '@/utils/errorHandler'
 import { BabelFileResult, transformAsync, transformFileAsync } from '@babel/core'
 import { traverse } from '@/utils/babelTraverse'
 import t from '@babel/types'
-import commonjs from '@rollup/plugin-commonjs'
-import resolve from '@rollup/plugin-node-resolve'
-import replace from '@rollup/plugin-replace'
-import terser, { type Options } from '@rollup/plugin-terser'
+import { replacePlugin } from 'rolldown/plugins'
 import chokidar from 'chokidar'
 import fs from 'fs-extra'
 import { bold, green } from 'kolorist'
@@ -18,7 +15,7 @@ import { getPackageInfo } from 'local-pkg'
 import path from 'node:path'
 import os from 'node:os'
 import process from 'node:process'
-import { rollup } from 'rollup'
+import { rolldown } from 'rolldown'
 import { minify } from 'terser'
 import { performance } from 'perf_hooks'
 
@@ -161,12 +158,6 @@ let topLevelJobs: Array<Promise<any>> | null = []
 let bundleJobs: Array<Promise<any>> | null = []
 const startTime = Date.now()
 let __PROD__ = false
-const terserOptions: Options = {
-  ecma: 2016,
-  toplevel: true,
-  safari10: true,
-  format: { comments: false },
-}
 
 let independentPackages: string[] = []
 
@@ -255,25 +246,29 @@ async function bundleModule(module: string, pkg: string) {
       return true
     }
 
-    const bundle = await rollup({
+    // Rolldown 原生支持混合 ESM/CJS 模块图（基于 esbuild 语义），
+    // Rolldown 原生解析模块（基于 TypeScript 和 Node.js 行为），
+    // Rolldown 内置 replace（Rust 实现，替代 @rollup/plugin-replace）
+    const bundle = await rolldown({
       input: module,
       external: peerDependencies ? Object.keys(peerDependencies) : undefined,
       plugins: [
-        commonjs(),
-        replace({
-          preventAssignment: true,
-          values: {
+        replacePlugin(
+          {
             'process.env.NODE_ENV': JSON.stringify(NODE_ENV),
           },
-        }),
-        resolve(),
-        __PROD__ && terser(terserOptions),
-      ].filter(Boolean),
+          { preventAssignment: true },
+        ),
+      ],
+      // Rolldown 内置 treeshake（默认开启）
+      treeshake: true,
     })
     await bundle.write({
-      exports: 'named',
       file: `${pkg.replace(sourceDir, OUTPUT_DIR)}/miniprogram_npm/${module}/index.js`,
       format: 'cjs',
+      exports: 'named',
+      // 生产模式使用内置 minify（Rust 实现，比 terser 更快）
+      minify: __PROD__,
     })
     return true
   } else {
@@ -379,7 +374,9 @@ async function buildComponentLibrary(name: string) {
             if (result) {
               traverseAST(result.ast!, sourceDir, true)
               const code = (
-                __PROD__ ? (await minify(result.code!, terserOptions)).code : result.code
+                __PROD__
+                  ? (await minify(result.code!, { ecma: 2016, toplevel: true })).code
+                  : result.code
               ) as string
               await fs.writeFile(filePath, code)
             }
@@ -455,7 +452,7 @@ async function dealScriptCode(filePath: string, result: BabelFileResult) {
   traverseAST(ast, pkg ? path.join(sourceDir, pkg) : sourceDir)
 
   if (__PROD__) {
-    code = (await minify(code, terserOptions)).code as string
+    code = (await minify(code, { ecma: 2016, toplevel: true })).code as string
   }
   return code
 }
