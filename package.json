@@ -42,7 +42,7 @@
     "bin"
   ],
   "peerDependencies": {
-    "@unmagic/vue-mini": ">=1.0.2"
+    "@unmagic/vue-mini": ">=1.0.3"
   },
   "devDependencies": {
     "@rollup/plugin-alias": "^6.0.0",
