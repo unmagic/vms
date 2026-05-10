@@ -168,8 +168,8 @@ const IGNORED_FILES = (file: string, stats?: fs.Stats) => {
     file.endsWith('.gitkeep') ||
     file.endsWith('.DS_Store') ||
     file.endsWith('.d.ts') || // 类型声明文件不需要处理
-    file.includes('node_modules') ||
-    file.includes('.git')
+    /[\\/]node_modules[\\/]/.test(file) || // ✅ 精确匹配路径分隔符
+    /[\\/]\.git[\\/]/.test(file) // ✅ 精确匹配 .git 目录
   )
 }
 
@@ -200,6 +200,7 @@ async function batchProcess<T>(
         processor(items[currentIndex])
           .catch((error) => {
             console.error(`处理失败 [${items[currentIndex]}]:`, error)
+            hasError = true // ✅ 标记错误，阻止新任务启动
           })
           .finally(() => {
             running--
@@ -215,6 +216,7 @@ async function batchProcess<T>(
               // 继续启动下一个任务
               runNext()
             }
+            // 如果有错误，不再启动新任务，等待已启动的任务完成
           })
       }
     }
@@ -228,7 +230,10 @@ const pathCache = new Map<string, string>()
 function getOutputPath(inputPath: string): string {
   let cached = pathCache.get(inputPath)
   if (!cached) {
-    cached = inputPath.replace(sourceDir, OUTPUT_DIR)
+    // ✅ 安全的字符串替换（只替换前缀，避免 sourceDir 含正则特殊字符导致替换失败）
+    cached = inputPath.startsWith(sourceDir)
+      ? OUTPUT_DIR + inputPath.slice(sourceDir.length)
+      : inputPath
     pathCache.set(inputPath, cached)
   }
   return cached
@@ -686,20 +691,19 @@ async function dev() {
               processingFiles.add(targetPath)
               const date = Date.now()
               console.log(bold(green(`文件已修改：${targetPath}`)))
-              let shouldContinue = false
               try {
                 await cb(targetPath)
                 console.log(bold(green(`文件已处理完毕，耗时：${Date.now() - date}ms`)))
               } finally {
                 processingFiles.delete(targetPath)
-                // 如果编译期间又有新的保存，继续循环处理
-                if (pendingFiles.has(targetPath)) {
-                  pendingFiles.delete(targetPath)
-                  shouldContinue = true
+                // ✅ 修复：从 pendingFiles 中取下一个待处理的文件
+                const nextFile = Array.from(pendingFiles)[0]
+                if (nextFile) {
+                  pendingFiles.delete(nextFile)
+                  targetPath = nextFile
+                } else {
+                  targetPath = null
                 }
-              }
-              if (!shouldContinue) {
-                break
               }
             }
           }
