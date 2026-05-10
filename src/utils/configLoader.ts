@@ -1,8 +1,8 @@
 // 从用户配置文件加载配置
 import { UserConfig } from '@/types/build'
-import { resolve as pathResolve } from 'path'
+import { resolve as pathResolve } from 'node:path'
 import fs from 'fs-extra'
-import { pathToFileURL } from 'url'
+import { pathToFileURL } from 'node:url'
 import { getErrorMessage } from '@/utils/errorHandler'
 
 export async function loadUserConfig(): Promise<UserConfig> {

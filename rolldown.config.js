@@ -14,6 +14,12 @@ const externalDependencies = [
   'node:path',
   'node:process',
   'node:fs',
+  'node:fs/promises',
+  'node:crypto',
+  'node:os',
+  'node:module',
+  'perf_hooks',
+  'node:url',
   /\.node$/,
 ]
 
