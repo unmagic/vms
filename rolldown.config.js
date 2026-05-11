@@ -37,13 +37,6 @@ export default defineConfig({
   external: externalDependencies,
   treeshake: true,
   plugins: [
-    // builtin:replace — Rust 实现，替代 @rollup/plugin-replace
-    replacePlugin(
-      {
-        'process.env.NODE_ENV': JSON.stringify(process.env.NODE_ENV || 'production'),
-      },
-      { preventAssignment: true },
-    ),
     {
       name: 'clean-dist',
       async buildStart() {
