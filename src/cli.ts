@@ -401,7 +401,7 @@ async function buildComponentLibrary(name: string) {
 
       // 使用并发池处理所有 .js 文件（限制并发避免内存耗尽）
       const jsConcurrency = Math.min(10, CONCURRENT_LIMIT)
-      console.log(bold(green(`  处理 ${jsFiles.length} 个 JS 文件（并发=${jsConcurrency}）...`)))
+      // console.log(bold(green(`  处理 ${jsFiles.length} 个 JS 文件（并发=${jsConcurrency}）...`)))
 
       await batchProcess(
         jsFiles,
