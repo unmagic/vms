@@ -26,7 +26,6 @@ import {
   isGlobalVariableInScope,
 } from '@/script/scopeAnalyzer'
 import { createCompileError } from '@/utils/errorHandler'
-import { __IS_PROD__ } from '@/utils/constants'
 
 // 需要导入generate函数
 import { generate } from '@babel/generator'
@@ -162,54 +161,7 @@ export function processEventProperty(
   const expContent = exp.type === NodeTypes.SIMPLE_EXPRESSION ? exp.content : ''
   // 对于简单表达式，Vue compiler 可能不提供 AST (返回 undefined/null)
   // 或者提供的是无效的 AST，这时需要用 babel 重新解析
-  // 这样可以支持赋值表达式、逻辑表达式等复杂表达式
   let ast = fallbackParseExpression(exp.ast, expContent)
-  // 仅当内容包含赋值号（非 ==/===/!=/!==/=> 等）时才走 babel 兜底，
-  // 避免把简单标识符（如 onClick）或比较、箭头表达式误判
-  const ASSIGN_REGEXP = /(^|[^=!<>])=(?!=|>)/
-  const needsBabelParsing =
-    !ast &&
-    exp.type === NodeTypes.SIMPLE_EXPRESSION &&
-    exp.ast === undefined &&
-    ASSIGN_REGEXP.test(expContent)
-  if (needsBabelParsing) {
-    console.log('needsBabelParsing', expContent)
-    // 尝试用 babel 解析表达式
-    try {
-      const parsed = babelParse(expContent, { sourceType: 'script', plugins: ['typescript'] })
-      const body = parsed.program.body
-      if (body.length === 1 && t.isExpressionStatement(body[0])) {
-        ast = (body[0] as t.ExpressionStatement).expression
-      } else if (body.length >= 1) {
-        // 多个语句被解析，分号分隔了多个语句
-        // 将多个表达式语句合并为一个 SequenceExpression
-        const expressions: t.Expression[] = []
-        let hasNonExpression = false
-        for (const s of body) {
-          if (t.isExpressionStatement(s)) {
-            expressions.push(s.expression)
-          } else {
-            hasNonExpression = true
-          }
-        }
-        if (!__IS_PROD__ && hasNonExpression) {
-          console.warn(
-            `[vms] event handler expression contains non-expression statements, they will be dropped: ${expContent}`,
-          )
-        }
-        if (expressions.length === 1) {
-          ast = expressions[0]
-        } else if (expressions.length > 1) {
-          ast = t.sequenceExpression(expressions)
-        }
-      }
-    } catch (err) {
-      // babel 解析失败，继续使用简单路径
-      if (!__IS_PROD__) {
-        console.warn(`[vms] babel failed to parse event expression: ${expContent}`, err)
-      }
-    }
-  }
   if (!ast) {
     // 最终解析失败，当作简单标识符处理
     if (exp.type === NodeTypes.SIMPLE_EXPRESSION) {
