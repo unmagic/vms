@@ -824,3 +824,145 @@ const list = ref([
     expect(js).toMatch(/\.parent = item/)
   })
 })
+
+describe('9. 直接赋值表达式测试', () => {
+  it('9.1 简单布尔赋值', async () => {
+    const vueContent = `
+<template>
+  <t-button @tap="visibleRef = true">
+    显示
+  </t-button>
+</template>
+
+<script setup lang="ts">
+import { ref } from '@unmagic/vue-mini'
+const visibleRef = ref(false)
+</script>
+`
+    const { js, wxml } = await compileVueContent(vueContent)
+
+    // 验证 WXML 生成了桥接函数绑定
+    expect(wxml).toContain('bind:tap="__fun_')
+
+    // 验证 JS 生成了桥接函数
+    expect(js).toContain('function __fun_')
+    expect(js).toContain('(__vms_event)')
+    expect(js).toContain('__vmsProxyRefs.visibleRef = true')
+  })
+
+  it('9.2 条件表达式赋值', async () => {
+    const vueContent = `
+<template>
+  <t-button @tap="isLoading ? errorMsg = '加载中' : successMsg = '完成'">
+    状态切换
+  </t-button>
+</template>
+
+<script setup lang="ts">
+import { ref } from '@unmagic/vue-mini'
+const isLoading = ref(false)
+const errorMsg = ref('')
+const successMsg = ref('')
+</script>
+`
+    const { js, wxml } = await compileVueContent(vueContent)
+
+    expect(wxml).toContain('bind:tap="__fun_')
+    expect(js).toContain('function __fun_')
+  })
+
+  it('9.3 三元表达式赋值', async () => {
+    const vueContent = `
+<template>
+  <t-button @tap="isLoading ? errorMsg = '加载中' : successMsg = '完成'">
+    状态切换
+  </t-button>
+</template>
+
+<script setup lang="ts">
+import { ref } from '@unmagic/vue-mini'
+const isLoading = ref(false)
+const errorMsg = ref('')
+const successMsg = ref('')
+</script>
+`
+    const { js, wxml } = await compileVueContent(vueContent)
+
+    expect(wxml).toContain('bind:tap="__fun_')
+    expect(js).toContain('function __fun_')
+  })
+
+  it('9.4 数值运算赋值', async () => {
+    const vueContent = `
+<template>
+  <button @tap="count = count + 1">
+    增加
+  </button>
+</template>
+
+<script setup lang="ts">
+import { ref } from '@unmagic/vue-mini'
+const count = ref(0)
+</script>
+`
+    const { js, wxml } = await compileVueContent(vueContent)
+
+    expect(wxml).toContain('bind:tap="__fun_')
+    expect(js).toContain('function __fun_')
+    expect(js).toContain('__vmsProxyRefs.count = __vmsProxyRefs.count + 1')
+  })
+
+  it('9.5 v-for 中的直接赋值', async () => {
+    const vueContent = `
+<template>
+  <div v-for="(item, index) of list" @tap="item.selected = true">
+    {{ item.name }}
+  </div>
+</template>
+
+<script setup lang="ts">
+import { ref } from '@unmagic/vue-mini'
+const list = ref([
+  { name: '项目1', selected: false }
+])
+</script>
+`
+    const { js, wxml } = await compileVueContent(vueContent)
+
+    // 验证 WXML 传递 index
+    expect(wxml).toContain('data-a="{{[index]}}"')
+    expect(wxml).toContain('bind:tap="__fun_')
+
+    // item 只使用 1 次，不会创建局部引用，直接替换
+    expect(js).toMatch(/const\s*{\s*a:\s*\[index\]\s*}\s*=\s*__vms_event\.currentTarget\.dataset/)
+    expect(js).toContain('__vmsProxyRefs.list[index].selected = true')
+  })
+
+  it('9.6 v-for 中多次使用 item 时创建局部引用', async () => {
+    const vueContent = `
+<template>
+  <div v-for="(item, index) of list" @tap="() => { item.selected = !item.selected; console.log(item.name) }">
+    {{ item.name }}
+  </div>
+</template>
+
+<script setup lang="ts">
+import { ref } from '@unmagic/vue-mini'
+const list = ref([
+  { name: '项目1', selected: false }
+])
+</script>
+`
+    const { js, wxml } = await compileVueContent(vueContent)
+
+    // 验证 WXML 传递 index
+    expect(wxml).toContain('data-a="{{[index]}}"')
+    expect(wxml).toContain('bind:tap="__fun_')
+
+    // item 使用 2 次，应该创建局部引用
+    expect(js).toMatch(/const\s*{\s*a:\s*\[index\]\s*}\s*=\s*__vms_event\.currentTarget\.dataset/)
+    expect(js).toContain('const item = __vmsProxyRefs.list[index]')
+    expect(js).toContain('item.selected = !item.selected')
+    expect(js).toContain('console.log(item.name)')
+  })
+})

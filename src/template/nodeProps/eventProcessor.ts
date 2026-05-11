@@ -26,6 +26,7 @@ import {
   isGlobalVariableInScope,
 } from '@/script/scopeAnalyzer'
 import { createCompileError } from '@/utils/errorHandler'
+import { __IS_PROD__ } from '@/utils/constants'
 
 // 需要导入generate函数
 import { generate } from '@babel/generator'
@@ -43,10 +44,12 @@ import type { VForItemUsage } from './eventHelpers'
  * 2. babelParse(code) — 重新解析为完整 AST
  *
  * 注意：isAsync 必须正确传递，否则 babel 无法解析 await 关键字。
+ * 注意：不能使用 compact: true，否则多语句的 { } 会被移除导致解析错误
  */
 function reparseBodyAsAST(body: t.BlockStatement, isAsync: boolean): t.File {
   const arrowFunction = t.arrowFunctionExpression([], body, isAsync)
-  const code = generate(arrowFunction, { compact: true }).code
+  // 不能使用 compact: true，否则多语句 BlockStatement 的 { } 会被移除
+  const code = generate(arrowFunction).code
   return babelParse(code, {
     sourceType: 'module',
     plugins: ['typescript'],
@@ -157,8 +160,58 @@ export function processEventProperty(
   }
 
   const expContent = exp.type === NodeTypes.SIMPLE_EXPRESSION ? exp.content : ''
+  // 对于简单表达式，Vue compiler 可能不提供 AST (返回 undefined/null)
+  // 或者提供的是无效的 AST，这时需要用 babel 重新解析
+  // 这样可以支持赋值表达式、逻辑表达式等复杂表达式
   let ast = fallbackParseExpression(exp.ast, expContent)
+  // 仅当内容包含赋值号（非 ==/===/!=/!==/=> 等）时才走 babel 兜底，
+  // 避免把简单标识符（如 onClick）或比较、箭头表达式误判
+  const ASSIGN_REGEXP = /(^|[^=!<>])=(?!=|>)/
+  const needsBabelParsing =
+    !ast &&
+    exp.type === NodeTypes.SIMPLE_EXPRESSION &&
+    exp.ast === undefined &&
+    ASSIGN_REGEXP.test(expContent)
+  if (needsBabelParsing) {
+    console.log('needsBabelParsing', expContent)
+    // 尝试用 babel 解析表达式
+    try {
+      const parsed = babelParse(expContent, { sourceType: 'script', plugins: ['typescript'] })
+      const body = parsed.program.body
+      if (body.length === 1 && t.isExpressionStatement(body[0])) {
+        ast = (body[0] as t.ExpressionStatement).expression
+      } else if (body.length >= 1) {
+        // 多个语句被解析，分号分隔了多个语句
+        // 将多个表达式语句合并为一个 SequenceExpression
+        const expressions: t.Expression[] = []
+        let hasNonExpression = false
+        for (const s of body) {
+          if (t.isExpressionStatement(s)) {
+            expressions.push(s.expression)
+          } else {
+            hasNonExpression = true
+          }
+        }
+        if (!__IS_PROD__ && hasNonExpression) {
+          console.warn(
+            `[vms] event handler expression contains non-expression statements, they will be dropped: ${expContent}`,
+          )
+        }
+        if (expressions.length === 1) {
+          ast = expressions[0]
+        } else if (expressions.length > 1) {
+          ast = t.sequenceExpression(expressions)
+        }
+      }
+    } catch (err) {
+      // babel 解析失败，继续使用简单路径
+      if (!__IS_PROD__) {
+        console.warn(`[vms] babel failed to parse event expression: ${expContent}`, err)
+      }
+    }
+  }
   if (!ast) {
+    // 最终解析失败，当作简单标识符处理
     if (exp.type === NodeTypes.SIMPLE_EXPRESSION) {
       content = exp.content
       collectBindingVarsWithAST(t.identifier(content), node, returnValue, ctx)
@@ -240,6 +293,51 @@ function processASTExpression(
       node,
       returnValue,
       ctx,
+    )
+  } else if (t.isAssignmentExpression(ast)) {
+    // 处理直接赋值表达式：@tap="visibleRef = true"
+    // 将赋值表达式包装为 BlockStatement 处理
+    const wrappedBody = t.blockStatement([t.expressionStatement(ast)])
+    return processInlineArrowFunction(
+      wrappedBody,
+      [], // 直接赋值没有箭头函数参数
+      counter,
+      callExpressionWithArgs,
+      excludeBindingVars,
+      node,
+      returnValue,
+      ctx,
+      false,
+    )
+  } else if (t.isSequenceExpression(ast)) {
+    // 处理序列表达式（多个语句用分号分隔）
+    // @tap="item.selected = true; console.log(item.name)"
+    const statements = ast.expressions.map((expr) => t.expressionStatement(expr))
+    const wrappedBody = t.blockStatement(statements)
+    return processInlineArrowFunction(
+      wrappedBody,
+      [], // 直接表达式没有箭头函数参数
+      counter,
+      callExpressionWithArgs,
+      excludeBindingVars,
+      node,
+      returnValue,
+      ctx,
+      false,
+    )
+  } else if (t.isLogicalExpression(ast) || t.isConditionalExpression(ast)) {
+    // 处理逻辑表达式和条件表达式：@tap="canSubmit && isEnabled && submitRef = true"
+    // 或 @tap="isLoading ? errorMsg = '加载中' : successMsg = '完成'"
+    return createShortExprHandler(
+      ast,
+      [], // 直接表达式没有箭头函数参数
+      callExpressionWithArgs,
+      vForInfoList,
+      getVForVariables(ctx, node),
+      ctx,
+      counter,
+      returnValue,
+      false,
     )
   }
 
@@ -534,6 +632,9 @@ function collectExternalVarsFromExpression(
       collectVarsFromNode(node.right)
     } else if (t.isUnaryExpression(node)) {
       collectVarsFromNode(node.argument)
+    } else if (t.isAssignmentExpression(node)) {
+      collectVarsFromNode(node.left)
+      collectVarsFromNode(node.right)
     }
   }
 
@@ -602,6 +703,18 @@ function rewriteExpressionVars(
       )
     } else if (t.isUnaryExpression(node)) {
       return t.unaryExpression(node.operator, processExpr(node.argument))
+    } else if (t.isAssignmentExpression(node)) {
+      // 仅对 Identifier / MemberExpression 两种左值做重写，
+      // 其它（ArrayPattern / ObjectPattern 等解构左值）保持原样
+      const left = node.left
+      if (t.isIdentifier(left) || t.isMemberExpression(left)) {
+        const rewritten = processExpr(left as t.Expression)
+        // 重写后必须仍是合法左值（Identifier 或 MemberExpression）
+        if (t.isIdentifier(rewritten) || t.isMemberExpression(rewritten)) {
+          return t.assignmentExpression(node.operator, rewritten, processExpr(node.right))
+        }
+      }
+      return t.assignmentExpression(node.operator, left as t.LVal, processExpr(node.right))
     }
     return node
   }
