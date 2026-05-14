@@ -33,6 +33,7 @@ import { generate } from '@babel/generator'
 import { traverse } from '@/utils/babelTraverse'
 import { parse as babelParse } from '@babel/parser'
 import type { VForItemUsage } from './eventHelpers'
+import type { ScriptScope } from '@/types/scope'
 
 /**
  * 将 BlockStatement "重生"为完整 AST（File 节点）。
@@ -941,6 +942,7 @@ function processInlineArrowFunction(
     vForItemUsage,
     isAsync,
     dataKey,
+    ctx.scriptScope,
   )
 
   // 4. 存储函数信息
@@ -1194,6 +1196,7 @@ function createInlineHandlerBody(
   vForItemUsage?: VForItemUsage | null,
   isAsync: boolean = false,
   dataKey: string = 'a',
+  scriptScope?: ScriptScope,
 ): t.BlockStatement {
   const statements: t.Statement[] = []
   const paramNameMapping = new Map<string, string>() // 参数名映射
@@ -1255,7 +1258,7 @@ function createInlineHandlerBody(
 
     // 3. 创建局部引用（如果需要）
     if (vForItemUsage?.shouldCreateReference) {
-      statements.push(createLocalReference(vForInfoList, vForItemUsage))
+      statements.push(createLocalReference(vForInfoList, vForItemUsage, scriptScope))
     }
   }
 
@@ -1267,6 +1270,7 @@ function createInlineHandlerBody(
     vForItemUsage,
     paramNameMapping,
     isAsync,
+    scriptScope,
   )
 
   statements.push(...transformedBody.body)
@@ -1283,11 +1287,17 @@ function createInlineHandlerBody(
 function createLocalReference(
   vForInfoList: VForInfo[],
   vForItemUsage: VForItemUsage,
+  scriptScope?: ScriptScope,
 ): t.VariableDeclaration {
   const itemName = vForItemUsage.itemName
   const targetItemIndex = vForInfoList.findIndex((info) => getVForItemName(info) === itemName)
   // useProxyRefsBase=true：强制从 __vmsProxyRefs 开始，不引用外层 item 标识符
-  const accessExpression = buildProxyRefsItemAccess(vForInfoList, targetItemIndex, undefined, true)
+  const accessExpression = buildProxyRefsItemAccess(
+    vForInfoList,
+    targetItemIndex,
+    scriptScope,
+    true,
+  )
 
   return t.variableDeclaration('const', [
     t.variableDeclarator(t.identifier(itemName), accessExpression),
@@ -1304,6 +1314,7 @@ function replaceVariableAccess(
   vForItemUsage?: VForItemUsage | null,
   paramNameMapping?: Map<string, string>,
   isAsync: boolean = false,
+  scriptScope?: ScriptScope,
 ): t.BlockStatement {
   const localVars = new Set<string>()
 
@@ -1377,7 +1388,7 @@ function replaceVariableAccess(
             return
           } else {
             // 未创建引用或不是 innermost item，需要替换为正确的访问路径
-            const accessExpression = buildProxyRefsItemAccess(vForInfoList, itemIndex)
+            const accessExpression = buildProxyRefsItemAccess(vForInfoList, itemIndex, scriptScope)
 
             path.replaceWith(accessExpression)
             return

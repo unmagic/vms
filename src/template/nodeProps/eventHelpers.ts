@@ -2,6 +2,7 @@ import t from '@babel/types'
 import type { VForInfo } from '@/types/node'
 import type { ScriptScope } from '@/types/scope'
 import { getVForItemName, getVForIndexName, getVForSourceExpression } from '@/utils/tools'
+import { isImportVariable } from '@/script/scopeAnalyzer'
 
 export const EVENT_PARAM_NAME = '__vms_event'
 
@@ -102,6 +103,12 @@ export function buildProxyRefsItemAccess(
     for (const prop of firstPartProps) {
       expr = t.memberExpression(expr, t.identifier(prop))
     }
+  } else if (firstProp && scriptScope && isImportVariable(firstProp, scriptScope)) {
+    // 以 import 变量开头 — import 在模块作用域可直接访问，不经过 __vmsProxyRefs
+    expr = t.identifier(firstProp)
+    for (let i = 1; i < firstPartProps.length; i++) {
+      expr = t.memberExpression(expr, t.identifier(firstPartProps[i]))
+    }
   } else {
     // 以 __vmsProxyRefs 的属性开头
     expr = t.identifier('__vmsProxyRefs')
@@ -191,6 +198,11 @@ export function buildProxyRefsArgument(
     if (scriptScope?.props.has(arg.name)) {
       const propsVarName = scriptScope.propsVarName || '__vmsProps'
       return t.memberExpression(t.identifier(propsVarName), t.identifier(arg.name))
+    }
+
+    // 检查是否是 import 变量 — import 在模块作用域可直接访问
+    if (scriptScope && isImportVariable(arg.name, scriptScope)) {
+      return arg
     }
 
     return t.memberExpression(t.identifier('__vmsProxyRefs'), t.identifier(arg.name))
