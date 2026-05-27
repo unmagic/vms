@@ -34,7 +34,13 @@ export default defineConfig({
   // Rolldown 原生支持 JSON 导入（作为内置模块类型），无需 json 插件
   // TypeScript 转换由 Babel 处理（babel.config.ts），Rolldown 仅负责打包
   // Rolldown 内置 treeshake（默认开启），比 Rollup 更激进
-  external: externalDependencies,
+  external: (id) => {
+    return externalDependencies.some((ext) => {
+      if (typeof ext === 'string') return id === ext || id.startsWith(ext + '/')
+      if (ext instanceof RegExp) return ext.test(id)
+      return false
+    })
+  },
   treeshake: true,
   plugins: [
     {

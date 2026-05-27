@@ -1,4 +1,4 @@
-import pk from '@babel/runtime/package.json'
+import pk from '@babel/runtime/package.json' with { type: 'json' }
 
 const runtimeVersion = pk.version
 
