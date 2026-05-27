@@ -1,9 +1,8 @@
-import { defineConfig } from 'rolldown'
-import { replacePlugin } from 'rolldown/plugins'
-import { copyFile, mkdir, rm } from 'fs/promises'
 import { existsSync } from 'fs'
-import pkg from './package.json' with { type: 'json' }
 import fsExtra from 'fs-extra'
+import { copyFile, mkdir, rm } from 'fs/promises'
+import { defineConfig } from 'rolldown'
+import pkg from './package.json' with { type: 'json' }
 
 const { copy, stat } = fsExtra
 
@@ -42,6 +41,13 @@ export default defineConfig({
     })
   },
   treeshake: true,
+  // 阻止 rolldown 在构建时常量折叠 process.env.NODE_ENV
+  // 该值由 runVMS() 在运行时通过动态 import 前设置，构建时不应替换
+  transform: {
+    define: {
+      'process.env.NODE_ENV': 'process.env.NODE_ENV',
+    },
+  },
   plugins: [
     {
       name: 'clean-dist',
