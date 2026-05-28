@@ -1,6 +1,6 @@
 {
   "name": "@unmagic/vms",
-  "version": "0.1.6-beta.0",
+  "version": "0.1.6",
   "description": "基于 @unmagic/vue-mini 的Vue3 单文件组件构建工具",
   "type": "module",
   "main": "dist/index.js",
