@@ -301,7 +301,7 @@ async function bundleModule(module: string, pkg: string) {
       format: 'cjs',
       exports: 'named',
       // 生产模式使用内置 minify（Rust 实现，比 terser 更快）
-      minify: __PROD__,
+      minify: false,
     })
     return true
   } else {
