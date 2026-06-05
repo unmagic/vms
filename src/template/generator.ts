@@ -4,9 +4,7 @@ import type { VMSCodegenNode, VMSCodegenProp } from '@/types/node'
 import { getCodegenNode } from './tools'
 
 function createAttr(prop: VMSCodegenProp, key: string): string {
-  return typeof prop?.content === 'undefined'
-    ? ` ${key}`
-    : ` ${key}="${prop.content}"`
+  return typeof prop?.content === 'undefined' ? ` ${key}` : ` ${key}="${prop.content}"`
 }
 
 class WXMLGenerator {
@@ -51,9 +49,9 @@ class WXMLGenerator {
       case NodeTypes.ELEMENT:
         this.generateElement(node)
         break
-    case NodeTypes.TEXT:
-    case NodeTypes.COMMENT:
-    case NodeTypes.INTERPOLATION:
+      case NodeTypes.TEXT:
+      case NodeTypes.COMMENT:
+      case NodeTypes.INTERPOLATION:
         this.generateLeafNode(node)
         break
       default:

@@ -71,15 +71,16 @@ export default {
     version: '1.0.0',
     description: '项目描述',
   },
-  sourceDir: 'src',      // 源码目录（默认 src）
-  outputDir: 'dist',     // 输出目录（默认 dist）
+  sourceDir: 'src', // 源码目录（默认 src）
+  outputDir: 'dist', // 输出目录（默认 dist）
   alias: { '@': './src' }, // 路径别名（默认 @ → ./src）
-  component: {           // 第三方组件匹配（可选）
+  component: {
+    // 第三方组件匹配（可选）
     prefix: 'td-',
     pathPrefix: 'tdesign-miniprogram/',
   },
-  cacheStats: false,      // 缓存统计开关（默认 false）
-  copyOnly: [],           // 跳过 Babel 直接复制的文件（如 ['big.js', 'ec-canvas/']）
+  cacheStats: false, // 缓存统计开关（默认 false）
+  copyOnly: [], // 跳过 Babel 直接复制的文件（如 ['big.js', 'ec-canvas/']）
 }
 ```
 
@@ -179,7 +180,14 @@ onLoad(() => {
 
 ```vue
 <!-- 箭头函数执行多条语句 -->
-<button @tap="() => { doA(); doB() }">点击</button>
+<button
+  @tap="
+    () => {
+      doA()
+      doB()
+    }
+  "
+>点击</button>
 
 <!-- 条件表达式 -->
 <button @tap="() => (isEdit ? update() : create())">保存</button>
@@ -260,10 +268,11 @@ const items = ref([{ name: 'Item 1', onClick: () => console.log('clicked') }])
 <script setup>
 import { ref, computed, watch } from '@unmagic/vue-mini'
 
-const count = ref(0)                           // ref
-const double = computed(() => count.value * 2)  // computed
+const count = ref(0) // ref
+const double = computed(() => count.value * 2) // computed
 
-watch(count, (newVal, oldVal) => {              // watch
+watch(count, (newVal, oldVal) => {
+  // watch
   console.log('count changed:', oldVal, '->', newVal)
 })
 </script>
@@ -328,19 +337,24 @@ VMS 支持完整的 Vue `:style` 语法。
 <!-- 子组件定义插槽 -->
 <template>
   <div>
-    <slot></slot>                   <!-- 默认插槽 -->
-    <slot name="header"></slot>     <!-- 具名插槽 -->
+    <slot></slot>
+    <!-- 默认插槽 -->
+    <slot name="header"></slot>
+    <!-- 具名插槽 -->
   </div>
 </template>
 
 <!-- 父组件使用 -->
 <template>
   <ChildComponent>
-    <div>默认插槽内容</div>          <!-- 默认插槽 -->
-    <template #header>              <!-- 具名插槽 -->
+    <div>默认插槽内容</div>
+    <!-- 默认插槽 -->
+    <template #header>
+      <!-- 具名插槽 -->
       <div>头部内容</div>
     </template>
-    <template #content>             <!-- 多子节点 -->
+    <template #content>
+      <!-- 多子节点 -->
       <span>内容1</span>
       <span>内容2</span>
     </template>
@@ -471,53 +485,53 @@ onLoad((options) => {
 
 ### 页面组件生命周期
 
-| VMS 生命周期        | 小程序原生方法              | 执行时机                |
-| ------------------- | --------------------------- | ----------------------- |
-| `setup`             | `lifetimes.attached`        | 页面实例创建            |
-| `onLoad`            | `methods.onLoad`            | 页面加载，可获取参数    |
-| `onShow`            | `methods.onShow`            | 页面显示                |
-| `onReady`           | `methods.onReady`           | 页面初次渲染完成        |
-| `onHide`            | `methods.onHide`            | 页面隐藏                |
-| `onUnload`          | `methods.onUnload`          | 页面卸载                |
-| `onPullDownRefresh` | `methods.onPullDownRefresh` | 下拉刷新                |
-| `onReachBottom`     | `methods.onReachBottom`     | 上拉触底                |
-| `onPageScroll`      | `methods.onPageScroll`      | 页面滚动                |
-| `onShareAppMessage` | `methods.onShareAppMessage` | 转发分享                |
-| `onShareTimeline`   | `methods.onShareTimeline`   | 分享到朋友圈            |
+| VMS 生命周期        | 小程序原生方法              | 执行时机             |
+| ------------------- | --------------------------- | -------------------- |
+| `setup`             | `lifetimes.attached`        | 页面实例创建         |
+| `onLoad`            | `methods.onLoad`            | 页面加载，可获取参数 |
+| `onShow`            | `methods.onShow`            | 页面显示             |
+| `onReady`           | `methods.onReady`           | 页面初次渲染完成     |
+| `onHide`            | `methods.onHide`            | 页面隐藏             |
+| `onUnload`          | `methods.onUnload`          | 页面卸载             |
+| `onPullDownRefresh` | `methods.onPullDownRefresh` | 下拉刷新             |
+| `onReachBottom`     | `methods.onReachBottom`     | 上拉触底             |
+| `onPageScroll`      | `methods.onPageScroll`      | 页面滚动             |
+| `onShareAppMessage` | `methods.onShareAppMessage` | 转发分享             |
+| `onShareTimeline`   | `methods.onShareTimeline`   | 分享到朋友圈         |
 
 ### 自定义组件生命周期
 
-| VMS 生命周期 | 小程序原生           | 执行时机                |
-| ------------ | -------------------- | ----------------------- |
-| `setup`      | `lifetimes.attached` | 组件实例创建            |
-| `onReady`    | `lifetimes.ready`    | 组件布局完成            |
-| `onMove`     | `lifetimes.moved`    | 组件位置变化            |
-| `onDetach`   | `lifetimes.detached` | 组件从页面移除          |
+| VMS 生命周期 | 小程序原生           | 执行时机       |
+| ------------ | -------------------- | -------------- |
+| `setup`      | `lifetimes.attached` | 组件实例创建   |
+| `onReady`    | `lifetimes.ready`    | 组件布局完成   |
+| `onMove`     | `lifetimes.moved`    | 组件位置变化   |
+| `onDetach`   | `lifetimes.detached` | 组件从页面移除 |
 
 **限制：** 自定义组件（非页面）中不能使用 `onLoad`/`onUnload`，请改用 `onReady`/`onDetach`。
 
 ### 组件中监听所在页面生命周期
 
-| VMS 生命周期  | 小程序原生                | 执行时机         |
-| ------------- | ------------------------- | ---------------- |
-| `onShow`      | `pageLifetimes.show`      | 所在页面显示     |
-| `onHide`      | `pageLifetimes.hide`      | 所在页面隐藏     |
-| `onResize`    | `pageLifetimes.resize`    | 所在页面尺寸变化 |
+| VMS 生命周期 | 小程序原生             | 执行时机         |
+| ------------ | ---------------------- | ---------------- |
+| `onShow`     | `pageLifetimes.show`   | 所在页面显示     |
+| `onHide`     | `pageLifetimes.hide`   | 所在页面隐藏     |
+| `onResize`   | `pageLifetimes.resize` | 所在页面尺寸变化 |
 
 ## 限制说明
 
 ### 不支持的 Vue 特性
 
-| 特性                | 说明                                   |
-| -------------------- | -------------------------------------- |
-| `v-model`            | 不支持双向绑定                         |
-| `defineModel`        | 编译宏不支持                           |
-| `defineSlots`        | 编译宏不支持                           |
-| `v-bind="obj"`       | 需要逐个绑定属性                       |
-| 组合式函数           | `useTemplateRef`, `useSlots` 等不支持  |
-| Vue 内置组件         | `<transition>`, `<keep-alive>` 等     |
-| 作用域插槽           | 不支持数据传递给插槽                   |
-| `.prevent` 修饰符    | 需手动处理阻止默认行为                 |
+| 特性              | 说明                                  |
+| ----------------- | ------------------------------------- |
+| `v-model`         | 不支持双向绑定                        |
+| `defineModel`     | 编译宏不支持                          |
+| `defineSlots`     | 编译宏不支持                          |
+| `v-bind="obj"`    | 需要逐个绑定属性                      |
+| 组合式函数        | `useTemplateRef`, `useSlots` 等不支持 |
+| Vue 内置组件      | `<transition>`, `<keep-alive>` 等     |
+| 作用域插槽        | 不支持数据传递给插槽                  |
+| `.prevent` 修饰符 | 需手动处理阻止默认行为                |
 
 ### 命名注意事项
 

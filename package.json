@@ -32,8 +32,8 @@
     "test:ui": "vitest --ui",
     "publish:ci": "npm publish",
     "link": "pnpm link --global",
-    "lint": "oxlint ./src",
-    "format": "oxfmt --check \"**/*.{js,cjs,ts,json,md}\"",
+    "lint": "oxlint --fix ./src ./test",
+    "format": "oxfmt --write \"**/*.{js,cjs,ts,json,md}\"",
     "release": "tsx release.ts",
     "prepare": "husky"
   },

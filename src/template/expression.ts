@@ -52,9 +52,10 @@ export function makeBabelOptions() {
  *
  * 后处理：$ → _（WXS 不支持 $）、void 0 → undefined（WXS 不支持 void）
  */
-export function downlevelExpressionCode(
-  expr: t.Expression,
-): { code: string; declarations: string } {
+export function downlevelExpressionCode(expr: t.Expression): {
+  code: string
+  declarations: string
+} {
   const programAST = t.program([t.expressionStatement(expr)])
   const result = transformFromAstSync(programAST, undefined, makeBabelOptions())
   if (!result?.code) {
@@ -101,7 +102,10 @@ export function parseDownleveledCode(code: string): t.Statement[] {
  * 当 rawAst === false 时，尝试用 @babel/parser 重新解析。
  * 返回解析后的 AST 表达式节点，或 null（解析也失败）。
  */
-export function fallbackParseExpression(rawAst: any, expression: string): t.Node | null | undefined {
+export function fallbackParseExpression(
+  rawAst: any,
+  expression: string,
+): t.Node | null | undefined {
   if (rawAst !== false) {
     return rawAst as t.Node | null | undefined
   }

@@ -11,7 +11,7 @@ const vueContent = fs.readFileSync(
 const { descriptor } = parse(vueContent)
 
 if (descriptor.template && descriptor.scriptSetup) {
-  const scriptScope = analyzeScriptScope(descriptor.scriptSetup.content)
+  const scriptScope = analyzeScriptScope(descriptor.scriptSetup.content).scope
 
   const templateResult = parseTemplate(descriptor.template.ast!, 'test.vue', false, scriptScope)
 

@@ -63,9 +63,10 @@ export async function transformVueToMiniProgram(
   try {
     // 1. 先分析 script 作用域（提取 props、宏、导入等信息）
     // 纯模板组件使用空的 scriptScope
-    const scriptScope = !scriptSetup
-      ? createEmptyScriptScope()
+    const scriptAnalysis = !scriptSetup
+      ? { scope: createEmptyScriptScope(), ast: null }
       : analyzeScriptScope(scriptSetup.content, filePath)
+    const scriptScope = scriptAnalysis.scope
 
     // 2. 转换 template（传入 scriptScope 用于变量来源分析）
     const {
@@ -79,6 +80,7 @@ export async function transformVueToMiniProgram(
     } = parseTemplate(template.ast, filePath, isPage, scriptScope)
 
     // 3. 转换 script（纯模板组件传递 null 作为 scriptSetup）
+    //    传入已解析的 AST，避免重复解析
     const result = await parseScript(
       descriptor,
       returnValue,
@@ -88,6 +90,7 @@ export async function transformVueToMiniProgram(
       needsProxyRefs,
       isPage,
       scriptScope,
+      scriptAnalysis.ast,
     )
 
     // 4. 转换 styles

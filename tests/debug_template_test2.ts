@@ -15,7 +15,7 @@ const scriptMatch = vueContent.match(/<script setup lang="ts">([\s\S]*?)<\/scrip
 
 if (scriptMatch) {
   const scriptContent = scriptMatch[1]
-  const scope = analyzeScriptScope(scriptContent)
+  const scope = analyzeScriptScope(scriptContent).scope
 
   // 创建模拟的 context
   const ctx = createVMSTransformContext(scope)

@@ -73,16 +73,20 @@ async function extractSetupBodyUsingAST(
   needsProxyRefs: boolean,
   isPage: boolean,
   scriptScope?: ScriptScope,
+  preParsedAst?: t.File | null,
 ) {
   let ast: t.File
   try {
-    ast = babelParse(scriptContent ?? '', {
-      sourceType: 'module',
-      plugins: ['typescript'],
-      ranges: true,
-      tokens: true,
-      errorRecovery: true,
-    })
+    // 复用已解析的 AST，避免重复解析（来自 analyzeScriptScope）
+    ast =
+      preParsedAst ??
+      babelParse(scriptContent ?? '', {
+        sourceType: 'module',
+        plugins: ['typescript'],
+        ranges: true,
+        tokens: true,
+        errorRecovery: true,
+      })
   } catch (error: unknown) {
     console.error(`❌ Failed to parse script content: ${getErrorMessage(error)}`)
     // 返回一个默认的AST结构，避免程序崩溃
@@ -471,6 +475,7 @@ export async function parseScript(
   needsProxyRefs: boolean = false,
   isPage: boolean = false,
   scriptScope?: ScriptScope,
+  preParsedAst?: t.File | null,
 ) {
   const scriptSetup = descriptor.scriptSetup
   const script = scriptSetup?.content
@@ -478,7 +483,7 @@ export async function parseScript(
   // 检查插槽使用
   const hasSlots = checkSlotsUsage(descriptor.template?.content)
 
-  // 提取setup函数体
+  // 提取setup函数体（复用已解析的 AST，避免重复解析）
   const { sfcContext, setupFunAst } = await extractSetupBodyUsingAST(
     script,
     returnValue,
@@ -488,6 +493,7 @@ export async function parseScript(
     needsProxyRefs,
     isPage,
     scriptScope,
+    preParsedAst,
   )
 
   // 生成import抽象语法

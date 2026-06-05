@@ -45,11 +45,9 @@ export class ComponentMatcher {
       // 移除前缀并构造路径
       const relativePath = componentName.slice(this.prefix.length)
       const path = `${this.pathPrefix}/${relativePath}/${relativePath}`
-      if (!this.exactMatches.has(componentName)) {
-        // 添加到严格匹配中
-        this.exactMatches.set(componentName, path)
-        this.isConfigMatch = true
-      }
+      // 缓存到精确匹配中，避免后续重复计算
+      this.exactMatches.set(componentName, path)
+      this.isConfigMatch = true
       return path
     }
 

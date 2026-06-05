@@ -40,9 +40,10 @@ export async function compileVueContent(
     const isTemplateOnly = !scriptSetup
 
     // 1. 先分析 script 作用域（纯模板组件使用空作用域）
-    const scriptScope = isTemplateOnly
-      ? createEmptyScriptScope()
+    const scriptAnalysis = isTemplateOnly
+      ? { scope: createEmptyScriptScope(), ast: null }
       : analyzeScriptScope(scriptSetup.content)
+    const scriptScope = scriptAnalysis.scope
 
     // 2. 转换 template（传入 scriptScope）
     const {
@@ -56,6 +57,7 @@ export async function compileVueContent(
     } = parseTemplate(template.ast, 'test.vue', isPage, scriptScope)
 
     // 3. 转换 script（纯模板组件传递 isTemplateOnly 标志）
+    //    传入已解析的 AST，避免重复解析
     const result = await parseScript(
       descriptor,
       returnValue,
@@ -65,6 +67,7 @@ export async function compileVueContent(
       needsProxyRefs,
       isPage,
       scriptScope,
+      scriptAnalysis.ast,
     )
 
     // 4. 生成 JSON 配置（模拟 transformer.ts 的逻辑）

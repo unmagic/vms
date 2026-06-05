@@ -164,15 +164,18 @@ export function getPolyfillFileRelativePath(polyfillFileName: string, filePath: 
     .join('/')
 }
 
-export function copyProjectConfigFile() {
-  return fs.readJson(path.join(process.cwd(), 'project.config.json')).then((config) => {
-    // 读取根目录下的project.config.json，并修改miniprogramRoot字段为：'./'，后写入到输出目录
+export async function copyProjectConfigFile() {
+  try {
+    const config = await fs.readJson(path.join(process.cwd(), 'project.config.json'))
+    // 移除 miniprogramRoot/srcMiniprogramRoot，因为输出目录即为小程序根目录
     Reflect.deleteProperty(config, 'miniprogramRoot')
     Reflect.deleteProperty(config, 'srcMiniprogramRoot')
     config.projectName = config.projectName + (__IS_PROD__ ? '-prod' : '-dev')
-    return fs.writeFile(
+    await fs.writeFile(
       path.join(OUTPUT_DIR, 'project.config.json'),
       JSON.stringify(config, null, 2),
     )
-  })
+  } catch (error: unknown) {
+    console.error(red('❌ 复制 project.config.json 失败：' + getErrorMessage(error)))
+  }
 }

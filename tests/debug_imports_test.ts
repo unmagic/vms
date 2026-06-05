@@ -13,7 +13,7 @@ if (scriptMatch) {
   console.log(scriptContent.slice(0, 500))
   console.log('\n--- Analyzing scope ---\n')
 
-  const scope = analyzeScriptScope(scriptContent)
+  const scope = analyzeScriptScope(scriptContent).scope
 
   console.log('Imports count:', scope.imports.size)
   console.log('Imports:')

@@ -8,7 +8,12 @@ import * as t from '@babel/types'
 import { traverse } from '@/utils/babelTraverse'
 import type { ScriptScope, VariableInfo } from '@/types/scope'
 import { isGlobalVariable } from '@/utils/globalWhitelist'
-import { createCompileError, extractErrorLoc, getErrorMessage, handleCompileError } from '@/utils/errorHandler'
+import {
+  createCompileError,
+  extractErrorLoc,
+  getErrorMessage,
+  handleCompileError,
+} from '@/utils/errorHandler'
 
 /**
  * 创建空的 ScriptScope
@@ -24,16 +29,25 @@ export function createEmptyScriptScope(): ScriptScope {
 }
 
 /**
+ * 脚本解析结果类型，包含作用域信息和 AST
+ */
+export interface ScriptAnalysisResult {
+  scope: ScriptScope
+  ast: t.File
+}
+
+/**
  * 分析脚本作用域
  * @param scriptContent script 内容
  * @param filePath 文件路径（用于错误信息展示）
- * @returns ScriptScope
+ * @returns ScriptAnalysisResult（包含 scope 和解析后的 AST，供后续阶段复用，避免重复解析）
  */
-export function analyzeScriptScope(scriptContent: string, filePath?: string): ScriptScope {
+export function analyzeScriptScope(scriptContent: string, filePath?: string): ScriptAnalysisResult {
   const scope = createEmptyScriptScope()
 
+  let ast: t.File
   try {
-    const ast = babelParse(scriptContent, {
+    ast = babelParse(scriptContent, {
       sourceType: 'module',
       plugins: ['typescript'],
     })
@@ -124,11 +138,13 @@ export function analyzeScriptScope(scriptContent: string, filePath?: string): Sc
       throw compileError
     }
 
-    console.error(`❌ Failed to parse script${filePath ? ` in ${filePath}` : ''}: ${getErrorMessage(error)}`)
+    console.error(
+      `❌ Failed to parse script${filePath ? ` in ${filePath}` : ''}: ${getErrorMessage(error)}`,
+    )
     throw error
   }
 
-  return scope
+  return { scope, ast }
 }
 
 /**

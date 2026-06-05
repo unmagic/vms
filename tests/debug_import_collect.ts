@@ -10,7 +10,7 @@ const vueContent = fs.readFileSync(
 const { descriptor } = parse(vueContent)
 
 if (descriptor.template && descriptor.scriptSetup) {
-  const scriptScope = analyzeScriptScope(descriptor.scriptSetup.content)
+  const scriptScope = analyzeScriptScope(descriptor.scriptSetup.content).scope
 
   console.log('Imports in scope:')
   for (const [name] of scriptScope.imports) {

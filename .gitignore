@@ -22,3 +22,5 @@ example
 .workbuddy
 .qoder
 
+# Debug files in tests
+tests/debug_*

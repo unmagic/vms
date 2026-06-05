@@ -25,21 +25,21 @@
 
 以下 Vue 特性目前尚未支持，将在后续版本中逐步实现：
 
-| 特性 | 说明 | 替代方案 |
-|------|------|---------|
-| `v-model` | 双向绑定 | 使用 `:value` + `@input` 手动实现 |
-| `defineModel` | 编译宏 | 使用 `props` + `emit` 手动实现 |
-| `useTemplateRef` | 组合式函数 | 使用小程序 `selectComponent` API |
-| `v-bind="obj"` | 整体绑定对象 | 暂无支持计划 |
-| `defineSlots` | 编译宏 | 不支持 |
-| 作用域插槽 | 插槽数据回传 | 难度大，排期优先级低 |
-| `<transition>` | 过渡组件 | 不支持 |
-| `<keep-alive>` | 缓存组件 | 不支持 |
-| `<Teleport>` | 传送组件 | 不支持 |
-| `<component :is>` | 动态组件 | 暂不支持 |
-| `v-html` | 原始 HTML | 不支持 |
-| `useSlots` | 组合式函数 | 不支持 |
-| `v-once` / `v-memo` | 渲染优化 | 不支持 |
+| 特性                | 说明         | 替代方案                          |
+| ------------------- | ------------ | --------------------------------- |
+| `v-model`           | 双向绑定     | 使用 `:value` + `@input` 手动实现 |
+| `defineModel`       | 编译宏       | 使用 `props` + `emit` 手动实现    |
+| `useTemplateRef`    | 组合式函数   | 使用小程序 `selectComponent` API  |
+| `v-bind="obj"`      | 整体绑定对象 | 暂无支持计划                      |
+| `defineSlots`       | 编译宏       | 不支持                            |
+| 作用域插槽          | 插槽数据回传 | 难度大，排期优先级低              |
+| `<transition>`      | 过渡组件     | 不支持                            |
+| `<keep-alive>`      | 缓存组件     | 不支持                            |
+| `<Teleport>`        | 传送组件     | 不支持                            |
+| `<component :is>`   | 动态组件     | 暂不支持                          |
+| `v-html`            | 原始 HTML    | 不支持                            |
+| `useSlots`          | 组合式函数   | 不支持                            |
+| `v-once` / `v-memo` | 渲染优化     | 不支持                            |
 
 ## 安装
 
@@ -156,9 +156,7 @@ const increment = () => {
 ```json
 // src/app.json
 {
-  "pages": [
-    "pages/index/Index"
-  ]
+  "pages": ["pages/index/Index"]
 }
 ```
 
@@ -169,7 +167,6 @@ vms dev
 ```
 
 编译输出到 `dist/` 目录，可直接使用微信开发者工具打开。
-
 
 ## AI 开发助手（Agent Skill）
 
@@ -198,19 +195,18 @@ npx skills add https://github.com/unmagic/vms/blob/main/skills/vms/SKILL.md
 - 已知限制与替代方案
 - 常见问题和调试技巧
 
-
 ## 已知限制
 
 ### WXS 环境兼容性
 
 VMS 生成的 WXS 代码运行在微信小程序的 WXS 环境中，该环境有以下限制，编译器会自动处理：
 
-| 特性 | 处理方式 |
-|------|---------|
-| `?.` 可选链 | 自动降级为条件表达式 |
-| `void 0` | 自动替换为 `undefined` |
-| `$` 标识符 | 自动替换为 `_` |
-| 箭头函数、模板字符串 | 自动降级 |
+| 特性                 | 处理方式               |
+| -------------------- | ---------------------- |
+| `?.` 可选链          | 自动降级为条件表达式   |
+| `void 0`             | 自动替换为 `undefined` |
+| `$` 标识符           | 自动替换为 `_`         |
+| 箭头函数、模板字符串 | 自动降级               |
 
 ### 首次渲染与 undefined
 

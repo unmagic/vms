@@ -256,48 +256,42 @@ export function collectBindingVarsWithVarNameList(
 
 /**
  * 检查表达式是否包含v-for变量
- * @param ast
- * @param vForVariables
- * @returns {boolean}
+ * 使用 VISITOR_KEYS 驱动遍历，覆盖所有 AST 节点类型
  */
 export function containsVForVariable(ast: t.Node, vForVariables: Set<string>): boolean {
   if (!ast) return false
 
-  switch (ast.type) {
-    case 'Identifier':
-      return vForVariables.has(ast.name)
-    case 'MemberExpression':
-      return (
-        containsVForVariable(ast.object, vForVariables) ||
-        containsVForVariable(ast.property, vForVariables)
-      )
-    case 'BinaryExpression':
-    case 'LogicalExpression':
-      return (
-        containsVForVariable(ast.left, vForVariables) ||
-        containsVForVariable(ast.right, vForVariables)
-      )
-    case 'ConditionalExpression':
-      return (
-        containsVForVariable(ast.test, vForVariables) ||
-        containsVForVariable(ast.consequent, vForVariables) ||
-        containsVForVariable(ast.alternate, vForVariables)
-      )
-    case 'CallExpression':
-      // 检查callee
-      if (containsVForVariable(ast.callee, vForVariables)) {
-        return true
-      }
-      // 检查参数
-      for (const arg of ast.arguments) {
-        if (containsVForVariable(arg, vForVariables)) {
-          return true
+  let found = false
+
+  function traverse(node: t.Node): void {
+    if (!node || found) return
+
+    if (node.type === 'Identifier' && vForVariables.has(node.name)) {
+      found = true
+      return
+    }
+
+    const visitorKeys = t.VISITOR_KEYS[node.type]
+    if (!visitorKeys) return
+
+    for (const key of visitorKeys) {
+      const value = (node as unknown as Record<string, unknown>)[key]
+      if (Array.isArray(value)) {
+        for (const child of value) {
+          if (child && typeof child === 'object' && Object.hasOwn(child, 'type')) {
+            traverse(child as t.Node)
+            if (found) return
+          }
         }
+      } else if (value && typeof value === 'object' && Object.hasOwn(value, 'type')) {
+        traverse(value as t.Node)
+        if (found) return
       }
-      return false
-    default:
-      return false
+    }
   }
+
+  traverse(ast)
+  return found
 }
 
 /**
@@ -337,16 +331,14 @@ export function containsExternalFunctionCall(node: any): boolean {
 
 /**
  * 检查表达式AST中是否包含外部函数调用
- * @param ast
- * @returns {boolean}
+ * 使用 VISITOR_KEYS 驱动遍历，避免访问 Babel 内部属性（如 loc/start/end）
  */
-export function containsExternalFunctionInExpression(ast: any): boolean {
+export function containsExternalFunctionInExpression(ast: t.Node): boolean {
   if (!ast) return false
 
   let hasExternalFunction = false
 
-  // 遍历AST节点
-  function traverse(node: any): void {
+  function traverse(node: t.Node): void {
     if (!node || hasExternalFunction) return
 
     if (node.type === 'CallExpression') {
@@ -356,17 +348,22 @@ export function containsExternalFunctionInExpression(ast: any): boolean {
       }
     }
 
-    // 递归遍历子节点
-    for (const key in node) {
-      if (Object.prototype.hasOwnProperty.call(node, key)) {
-        const child = node[key]
-        if (typeof child === 'object' && child !== null) {
-          if (Array.isArray(child)) {
-            child.forEach(traverse)
-          } else {
-            traverse(child)
+    // 使用 VISITOR_KEYS 只访问有效子节点，避免遍历 loc/start/end 等内部属性
+    const visitorKeys = t.VISITOR_KEYS[node.type]
+    if (!visitorKeys) return
+
+    for (const key of visitorKeys) {
+      const value = (node as unknown as Record<string, unknown>)[key]
+      if (Array.isArray(value)) {
+        for (const child of value) {
+          if (child && typeof child === 'object' && Object.hasOwn(child, 'type')) {
+            traverse(child as t.Node)
+            if (hasExternalFunction) return
           }
         }
+      } else if (value && typeof value === 'object' && Object.hasOwn(value, 'type')) {
+        traverse(value as t.Node)
+        if (hasExternalFunction) return
       }
     }
   }
