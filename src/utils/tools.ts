@@ -1,4 +1,4 @@
-import type { VForInfo, VMSRootNode, VMSTemplateChildNode } from '@/types/node'
+import type { VForInfo, VMSRootNode, VMSTemplateChildNode, VMSEnhancedNode } from '@/types/node'
 import path from 'node:path'
 import fs from 'fs-extra'
 import { red } from 'kolorist'
@@ -71,7 +71,7 @@ export function getVForSourceParts(vForInfo: VForInfo): { object?: string; prope
  */
 export function getParentVFor(node: VMSRootNode): VForInfo | null {
   // Legacy: reads from node directly — only used outside transform context
-  const vForInfoList = (node as any).vForInfoList
+  const vForInfoList = (node as VMSEnhancedNode).vForInfoList
   if (Array.isArray(vForInfoList)) {
     return vForInfoList.at(-1) || null
   }
@@ -84,7 +84,7 @@ export function getParentVFor(node: VMSRootNode): VForInfo | null {
  */
 export function getVForVariablesFromNode(node: VMSRootNode | VMSTemplateChildNode): Set<string> {
   const vForVariables = new Set<string>()
-  const list: VForInfo[] | undefined = (node as any).vForInfoList
+  const list: VForInfo[] | undefined = (node as VMSEnhancedNode).vForInfoList
   list?.forEach((vForInfo) => {
     const itemName = getVForItemName(vForInfo)
     if (itemName) vForVariables.add(itemName)
@@ -100,7 +100,7 @@ export function getVForVariablesFromNode(node: VMSRootNode | VMSTemplateChildNod
  */
 export function getVForItemNameFromNode(node: VMSRootNode | VMSTemplateChildNode): Set<string> {
   const vForVariables = new Set<string>()
-  const list: VForInfo[] | undefined = (node as any).vForInfoList
+  const list: VForInfo[] | undefined = (node as VMSEnhancedNode).vForInfoList
   list?.forEach((vForInfo) => {
     const itemName = getVForItemName(vForInfo)
     if (itemName) vForVariables.add(itemName)
@@ -115,7 +115,7 @@ export function getVForItemNameFromNode(node: VMSRootNode | VMSTemplateChildNode
  */
 export function getVForIndexNameFromNode(node: VMSRootNode): Set<string> {
   const vForVariables = new Set<string>()
-  const list: VForInfo[] | undefined = (node as any).vForInfoList
+  const list: VForInfo[] | undefined = (node as VMSEnhancedNode).vForInfoList
   list?.forEach((vForInfo) => {
     const indexName = getVForIndexName(vForInfo)
     if (indexName) vForVariables.add(indexName)

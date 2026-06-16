@@ -11,6 +11,24 @@ import type { NodePath } from '@babel/traverse'
 import * as t from '@babel/types'
 import type { ScriptScope } from './scope'
 
+// 扩展 Vue 编译器核心类型，添加 VMS 自定义属性
+declare module '@vue/compiler-core' {
+  interface PlainElementNode {
+    __vmsCodegenNode?: VMSCodegenNode
+    vForInfoList?: VForInfo[]
+  }
+  interface RootNode {
+    __vmsCodegenNode?: VMSCodegenNode
+    vForInfoList?: VForInfo[]
+  }
+}
+
+// VMS 增强的节点类型，包含自定义属性
+export type VMSEnhancedNode = (TemplateChildNode | RootNode) & {
+  __vmsCodegenNode?: VMSCodegenNode
+  vForInfoList?: VForInfo[]
+}
+
 // 'element' | 'text' | 'interpolation' | 'comment' | 'block' | 'root'
 /**
  * VMS 代码生成节点 - 每个 AST 节点自持，包含生成 WXML 所需的全部信息

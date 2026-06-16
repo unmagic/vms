@@ -27,6 +27,10 @@ import {
   type NodeTransform,
   type RootNode,
   type TemplateChildNode,
+  type InterpolationNode,
+  type TextNode,
+  type CommentNode,
+  type ElementNode,
 } from '@vue/compiler-core'
 import { generate } from '@babel/generator'
 import { getComponentMatcher, WXS_NAMESPACE } from '@/utils/constants'
@@ -137,7 +141,7 @@ function createUnifiedNodeTransform(
   return (node) => {
     // 处理 INTERPOLATION 节点（如 {{ selectedStoreName }}）
     if (node.type === NodeTypes.INTERPOLATION) {
-      const interpolationNode = node as any
+      const interpolationNode = node as InterpolationNode
       if (interpolationNode.content?.type === NodeTypes.SIMPLE_EXPRESSION) {
         // 使用 getTemplateNodeProp 处理表达式，收集变量到 returnValue
         const { content } = getTemplateNodeProp(
@@ -171,7 +175,7 @@ function createUnifiedNodeTransform(
       return
     }
 
-    const elementNode = node as any
+    const elementNode = node as ElementNode
     const transformCtx: TransformerContext = {
       returnValue,
       counter,
@@ -247,7 +251,7 @@ function createSimpleCodegenNode(node: TemplateChildNode): VMSCodegenNode | null
     case NodeTypes.TEXT:
       return {
         type: NodeTypes.TEXT,
-        content: (node as any).content,
+        content: (node as TextNode).content,
         loc: node.loc,
       }
 
@@ -266,7 +270,7 @@ function createSimpleCodegenNode(node: TemplateChildNode): VMSCodegenNode | null
     case NodeTypes.COMMENT:
       return {
         type: NodeTypes.COMMENT,
-        content: (node as any).content,
+        content: (node as CommentNode).content,
         loc: node.loc,
       }
 
@@ -285,7 +289,7 @@ function createRootNodeTransform(): NodeTransform {
 
     // 返回 exit 钩子，在离开根节点时收集所有子节点的 codegenNode
     return () => {
-      const rootNode = node as any
+      const rootNode = node as RootNode
       const children: VMSCodegenNode[] = []
 
       for (const child of rootNode.children || []) {

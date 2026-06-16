@@ -7,6 +7,7 @@ import type {
   VMSRootNode,
   VMSTemplateChildNode,
   VMSTransformContext,
+  VMSEnhancedNode,
 } from '@/types/node'
 import type { ScriptScope } from '@/types/scope'
 import {
@@ -20,6 +21,7 @@ import {
   type DirectiveNode,
   type ElementNode,
   NodeTypes,
+  type RootNode,
   type TemplateChildNode,
 } from '@vue/compiler-core'
 
@@ -56,7 +58,7 @@ export function getVForInfoList(ctx: VMSTransformContext, node: object): VForInf
  * 节点自身持有 codegenNode，不再通过 ctx 存储
  */
 export function getCodegenNode(node: object): VMSCodegenNode | undefined {
-  return (node as any).__vmsCodegenNode
+  return (node as VMSEnhancedNode).__vmsCodegenNode
 }
 
 /**
@@ -74,13 +76,14 @@ export function getCodegenNodeProps(node: object): Required<VMSCodegenNode>['pro
  */
 export function setCodegenNode(node: object, codegenNode: VMSCodegenNode): void {
   const existingCodegen = getCodegenNode(node)
+  const target = node as VMSEnhancedNode
   if (existingCodegen?.tag?.startsWith(VMS_FIXED_TAG_PREFIX)) {
-    ;(node as any).__vmsCodegenNode = codegenNode
+    target.__vmsCodegenNode = codegenNode
     if (codegenNode) {
-      ;(node as any).__vmsCodegenNode.tag = existingCodegen.tag
+      target.__vmsCodegenNode!.tag = existingCodegen.tag
     }
   } else {
-    ;(node as any).__vmsCodegenNode = codegenNode
+    target.__vmsCodegenNode = codegenNode
   }
 }
 
@@ -109,7 +112,7 @@ export function collectThirdComponents(
   node: VMSRootNode | VMSTemplateChildNode,
   thirdPartyComponents: Map<string, string>,
 ): void {
-  const tag = (node as any).tag
+  const tag = (node as ElementNode).tag
   if (node.type === 1) {
     if (tag) {
       const path = getComponentMatcher.match(tag)
@@ -126,7 +129,11 @@ export function collectThirdComponents(
  * @param {string} key
  */
 export function addProperty(returnValue: t.ObjectExpression, key: string): void {
-  if (!returnValue.properties.some((p) => (p as any).key.name === key)) {
+  if (
+    !returnValue.properties.some(
+      (p) => t.isObjectProperty(p) && t.isIdentifier(p.key) && p.key.name === key,
+    )
+  ) {
     const bindingVarId = t.identifier(key)
     returnValue.properties.push(t.objectProperty(bindingVarId, bindingVarId, false, true))
   }
@@ -516,7 +523,7 @@ export function assignVForInfoListMinimal(
       const newVForInfoList = parentVForInfoList ? [...parentVForInfoList, vForInfo] : [vForInfo]
       setVForInfoList(ctx, node, newVForInfoList)
 
-      const children = (node as any).children
+      const children = (node as ElementNode | RootNode).children
       if (Array.isArray(children)) {
         for (let i = children.length - 1; i >= 0; i--) {
           stack.push({
@@ -530,7 +537,7 @@ export function assignVForInfoListMinimal(
       if (hasVForInAncestry && parentVForInfoList) {
         setVForInfoList(ctx, node, parentVForInfoList)
       }
-      const children = (node as any).children
+      const children = (node as ElementNode | RootNode).children
       if (Array.isArray(children)) {
         for (let i = children.length - 1; i >= 0; i--) {
           stack.push({ node: children[i], parentVForInfoList, hasVForInAncestry })

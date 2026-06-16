@@ -6,4 +6,5 @@
  */
 import _traverse from '@babel/traverse'
 
-export const traverse = ((_traverse as any).default || _traverse) as typeof _traverse
+const traverseModule = _traverse as typeof _traverse & { default?: typeof _traverse }
+export const traverse = traverseModule.default || traverseModule

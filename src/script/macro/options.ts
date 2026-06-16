@@ -45,7 +45,7 @@ function astToValue(node: t.Node): unknown {
   }
   throw createCompileError(
     `defineOptions 不支持动态值（如变量、函数调用等），请使用字面量。节点类型：${node.type}`,
-    (node as any).loc || undefined,
+    node.loc || undefined,
   )
 }
 

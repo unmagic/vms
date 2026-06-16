@@ -32,25 +32,26 @@ function checkSlotsUsage(templateContent: string | undefined): boolean {
  * 如果已存在则跳过，否则追加到已有的 @unmagic/vue-mini import 或新建一个。
  */
 function ensureCoreImport(sfcContext: VMSSFCContext, specifierName: string): void {
-  const hasImport = sfcContext.importAST.some(
-    (importNode) =>
-      importNode.source.value === '@unmagic/vue-mini' &&
+  let vueImport: t.ImportDeclaration | undefined
+
+  for (const importNode of sfcContext.importAST) {
+    if (!t.isImportDeclaration(importNode) || importNode.source.value !== '@unmagic/vue-mini') {
+      continue
+    }
+    vueImport = importNode
+    if (
       importNode.specifiers.some(
         (spec) =>
           t.isImportSpecifier(spec) &&
           t.isIdentifier(spec.imported) &&
           spec.imported.name === specifierName,
-      ),
-  )
+      )
+    ) {
+      return
+    }
+  }
 
-  if (hasImport) return
-
-  const vueImport = sfcContext.importAST.find(
-    (importNode) =>
-      t.isImportDeclaration(importNode) && importNode.source.value === '@unmagic/vue-mini',
-  )
-
-  if (vueImport && t.isImportDeclaration(vueImport)) {
+  if (vueImport) {
     vueImport.specifiers.push(
       t.importSpecifier(t.identifier(specifierName), t.identifier(specifierName)),
     )

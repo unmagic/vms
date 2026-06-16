@@ -12,7 +12,7 @@ import type {
   VMSTemplateChildNode,
   VMSTransformContext,
 } from '@/types/node'
-import type { AttributeNode, DirectiveNode } from '@vue/compiler-core'
+import type { AttributeNode, DirectiveNode, RootNode } from '@vue/compiler-core'
 import { NodeTypes } from '@vue/compiler-core'
 import { extractVariablesFromExpressionAST } from '@/utils/ast'
 import { WXS_NAMESPACE } from '@/utils/constants'
@@ -27,8 +27,8 @@ export function transformTemplateClass(
   isPage: boolean = false,
 ): void {
   if (node.type === NodeTypes.ROOT) {
-    const rootChildren = (node as any).children.filter(
-      (child: any) => child.type === NodeTypes.ELEMENT,
+    const rootChildren = (node as RootNode).children.filter(
+      (child) => child.type === NodeTypes.ELEMENT,
     )
     if (!isPage && rootChildren.length === 1) {
       ctx.rootElementNode = rootChildren[0]
@@ -75,7 +75,9 @@ export function transformTemplateClass(
           const dynamicElements = allElements.filter((item) => !t.isStringLiteral(item))
           const stringLiteralElements = allElements.filter((item) => t.isStringLiteral(item))
           if (stringLiteralElements.length > 0) {
-            classPropContent.push(...stringLiteralElements.map((item) => (item as any).value))
+            classPropContent.push(
+              ...stringLiteralElements.map((item) => (item as t.StringLiteral).value),
+            )
           }
           if (dynamicElements.length > 0) {
             // 先从原始 AST 提取变量名

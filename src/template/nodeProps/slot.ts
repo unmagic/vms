@@ -1,12 +1,21 @@
 // 转换插槽和非插槽的template
 import type { VMSCodegenNode, VMSRootNode, VMSTemplateChildNode } from '@/types/node'
-import { type DirectiveNode, ElementNode, NodeTypes, type TemplateNode } from '@vue/compiler-core'
+import {
+  type DirectiveNode,
+  type ElementNode,
+  NodeTypes,
+  type TemplateNode,
+} from '@vue/compiler-core'
 import { isNotMergeProps, isVForNode, setCodegenNode } from '../tools'
 import { createCompileError } from '@/utils/errorHandler'
 
 export function transformSlotsAndTemplate(node: VMSRootNode | VMSTemplateChildNode): void {
   // 只处理元素节点且标签为template的情况
-  if (node.type !== NodeTypes.ELEMENT || (node as any).tag !== 'template' || !(node as any).props) {
+  if (
+    node.type !== NodeTypes.ELEMENT ||
+    (node as ElementNode).tag !== 'template' ||
+    !(node as ElementNode).props
+  ) {
     return
   }
   const templateNode = node as TemplateNode

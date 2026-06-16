@@ -68,11 +68,11 @@ export interface CompileError extends Error {
  * 2. babel 标准格式：error.loc（line/column 结构）
  */
 export function extractErrorLoc(error: unknown): ErrorLocation | null {
-  const err = error as any
+  const err = error as { cause?: { loc?: ErrorLocation }; loc?: { line: number; column: number } }
 
   // 格式 1: cause.loc（start/end 结构）
   if (err.cause?.loc) {
-    return err.cause.loc as ErrorLocation
+    return err.cause.loc
   }
 
   // 格式 2: 直接在 error 上的 loc（babel 标准格式：line/column）

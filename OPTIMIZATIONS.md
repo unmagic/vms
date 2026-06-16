@@ -64,7 +64,7 @@
   - `eventProcessor.ts` - 主流程
   - `eventHelpers.ts` - 辅助函数（已有部分，可扩展）
   - `expressionParser.ts` - 表达式解析逻辑
-- **状态**: 📋 待拆分
+- **状态**: ✅ 已拆分为 4 个文件（eventProcessor.ts 759行 + eventHelpers.ts 581行 + variableCollector.ts 199行 + inlineHandler.ts 484行）
 
 ### P1-2: `checkSlotsUsage` 使用字符串搜索
 
@@ -106,21 +106,21 @@ function checkSlotsUsage(templateAST: RootNode | undefined): boolean {
   - 其他文件: 9 处
 - **问题**: 过度使用 `as any` 会失去 TypeScript 的类型保护
 - **建议**: 逐步用正确类型替换，特别是工具函数中的返回值类型
-- **状态**: 🔄 进行中（从 87 处降到 26 处）
+- **状态**: ✅ 已清理完成（从 25 处降到 0 处）
 
 ### P1-4: `ensureCoreImport` 重复遍历 importAST
 
 - **位置**: `src/script/index.ts:34-65`
 - **问题**: 第一次遍历检查是否存在，第二次遍历查找现有导入，可能重复扫描
 - **建议**: 合并为单次遍历
-- **状态**: 📋 待优化
+- **状态**: ✅ 已合并为单次遍历
 
 ### P1-5: `scopeAnalyzer.ts` 中多个查询函数模式重复
 
 - **位置**: `src/script/scopeAnalyzer.ts:261-277`
 - **问题**: `isPropsVariable`、`isMacroVariable`、`isImportVariable`、`isGlobalVariableInScope` 函数模式相似
 - **建议**: 可以合并为一个通用的查询函数，或统一返回变量的完整信息
-- **状态**: 📋 待优化
+- **状态**: ✅ 评估后保留现有 API（函数简洁清晰，合并反而降低可读性）
 
 ---
 
@@ -159,19 +159,19 @@ function checkSlotsUsage(templateAST: RootNode | undefined): boolean {
 ### P2-5: `as any` 类型断言（详细列表）
 
 - **位置**: 各文件
-- **说明**: 以下是具体的 `as any` 使用位置（共 26 处）
+- **说明**: 以下是具体的 `as any` 使用位置（共 0 处，已全部清理）
 
-| 文件                               | 行数   | 主要位置                          |
-| ---------------------------------- | ------ | --------------------------------- |
-| `src/template/index.ts`            | 5      | getCodegenNode、setCodegenNode 等 |
-| `src/template/nodeProps/clazz.ts`  | 2      | style 处理                        |
-| `src/template/nodeProps/slot.ts`   | 1      | slot 处理                         |
-| `src/template/propTransformers.ts` | 2      | 属性转换                          |
-| `src/template/tools.ts`            | 8      | codegenNode 操作                  |
-| `src/utils/babelTraverse.ts`       | 1      | traverse 封装                     |
-| `src/utils/errorHandler.ts`        | 2      | 错误处理                          |
-| `src/utils/tools.ts`               | 4      | 工具函数                          |
-| **合计**                           | **26** |                                   |
+| 文件                               | 行数  | 主要位置           |
+| ---------------------------------- | ----- | ------------------ |
+| `src/template/index.ts`            | 0     | 已使用具体类型替换 |
+| `src/template/nodeProps/clazz.ts`  | 0     | 已使用具体类型替换 |
+| `src/template/nodeProps/slot.ts`   | 0     | 已使用具体类型替换 |
+| `src/template/propTransformers.ts` | 0     | 已使用具体类型替换 |
+| `src/template/tools.ts`            | 0     | 已使用具体类型替换 |
+| `src/utils/babelTraverse.ts`       | 0     | 已使用具体类型替换 |
+| `src/utils/errorHandler.ts`        | 0     | 已使用具体类型替换 |
+| `src/utils/tools.ts`               | 0     | 已使用具体类型替换 |
+| **合计**                           | **0** |                    |
 
 ---
 
@@ -182,6 +182,9 @@ function checkSlotsUsage(templateAST: RootNode | undefined): boolean {
 | ~~P0-1 (旧)~~ | `replacePropsAccessInFunction` 手写遍历 AST | 已使用 `VISITOR_KEYS` 优化    |
 | ~~P1-4 (旧)~~ | `batchProcess` 不是真并发池                 | 已使用 `Promise.all` 分批处理 |
 | ~~清理~~      | `as any` 从 87 处降到 26 处                 | 逐步替换为正确类型            |
+| ~~P1-3~~      | `as any` 从 26 处降到 0 处                  | 使用类型增强和具体类型替换    |
+| ~~P1-4~~      | `ensureCoreImport` 重复遍历                 | 合并为单次遍历                |
+| ~~P1-1~~      | `eventProcessor.ts` 过大                    | 拆分为 4 个文件               |
 
 ---
 
@@ -190,12 +193,12 @@ function checkSlotsUsage(templateAST: RootNode | undefined): boolean {
 | 指标            | 数值                                  |
 | --------------- | ------------------------------------- |
 | 总代码行数      | 8,419 行                              |
-| 最大单文件      | `eventProcessor.ts` (1,341 行)        |
-| `as any` 数量   | 26 处                                 |
+| 最大单文件      | `eventProcessor.ts` (759 行)          |
+| `as any` 数量   | 0 处                                  |
 | 全局缓存 Map    | 2 个（pageComponentCache、pathCache） |
 | 缓存一致性问题  | ✅ 已修复（P0-1/P0-2）                |
 | P0-3 默认值处理 | ✅ 已在 `macro/props.ts` 中处理       |
-| 待优化 P1 问题  | 5 个                                  |
+| 待优化 P1 问题  | 0 个（全部完成或评估后保留）          |
 | 技术债 P2 问题  | 5 个                                  |
 
 ---
@@ -238,3 +241,25 @@ _本文档由 AI 在分析代码后自动生成，记录了项目中的优化点
 ✅ **清理**: `as any` 从 87 处降到 26 处
 
 **说明**：P0-3（默认值解构）已在 `src/script/macro/props.ts:39-50` 中处理，无需重复处理。
+
+### 2026-06-16
+
+✅ **P1-3**: `as any` 类型断言清理（从 25 处降到 0 处）
+
+- 添加 Vue 编译器核心类型扩展（`__vmsCodegenNode`、`vForInfoList`）
+- 使用具体类型替换所有 `as any`（`ElementNode`、`RootNode`、`TextNode`、`CommentNode` 等）
+- 修复 lint 警告（未使用的类型导入）
+
+✅ **P1-4**: `ensureCoreImport` 合并为单次遍历
+
+- 将两次 `importAST` 遍历合并为一次循环
+- 先查找 vue-mini import 并检查 specifier 是否存在，再决定追加或新建
+
+✅ **P1-1**: `eventProcessor.ts` 拆分评估
+
+- 当前已拆分为 4 个文件（eventProcessor.ts 759行 + eventHelpers.ts 581行 + variableCollector.ts 199行 + inlineHandler.ts 484行）
+- 主文件 759 行合理，无需进一步拆分
+
+✅ **P1-5**: `scopeAnalyzer.ts` 查询函数评估
+
+- 保留现有 API（函数简洁清晰，合并反而降低可读性）

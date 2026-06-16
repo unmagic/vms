@@ -5,7 +5,7 @@
  * 所有转换器在统一节点转换器中被调用，结果按优先级合并
  */
 
-import { NodeTypes, type DirectiveNode } from '@vue/compiler-core'
+import { NodeTypes, type DirectiveNode, type SimpleExpressionNode } from '@vue/compiler-core'
 import type {
   VMSCodegenProp,
   PropTransformResult,
@@ -98,7 +98,7 @@ function parseForVariables(
   const hasExplicitIndex = directive.forParseResult.key?.type === NodeTypes.SIMPLE_EXPRESSION
 
   const forIndex = hasExplicitIndex
-    ? (directive.forParseResult.key as any).content
+    ? (directive.forParseResult.key as SimpleExpressionNode).content
     : counter.generateVForIndexName(forItem)
 
   return { forItem, forIndex }
