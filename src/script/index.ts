@@ -16,15 +16,35 @@ import { dealMacroOptions } from '@/script/macro/options'
 import { collectImports } from '@/script/collectImports'
 import { isImportVariable } from '@/script/scopeAnalyzer'
 import { type SFCDescriptor } from '@vue/compiler-sfc'
+import {
+  NodeTypes,
+  type ElementNode,
+  type RootNode,
+  type TemplateChildNode,
+} from '@vue/compiler-core'
 import type { VMSSFCContext } from '@/types/node'
 import { ScriptScope } from '@/types/scope'
 
-function checkSlotsUsage(templateContent: string | undefined): boolean {
-  // 检查模板中是否使用了插槽
-  if (!templateContent) {
+/**
+ * 检查模板 AST 中是否存在 <slot> 出口元素
+ * 基于 AST 而非字符串 includes，避免 class="slot-x" 等误判
+ */
+function checkSlotsUsage(templateAst: RootNode | undefined): boolean {
+  if (!templateAst) {
     return false
   }
-  return templateContent.includes('slot') || templateContent.includes('Slot')
+  const stack: Array<RootNode | TemplateChildNode> = [templateAst]
+  while (stack.length > 0) {
+    const node = stack.pop()!
+    if (node.type === NodeTypes.ELEMENT && (node as ElementNode).tag === 'slot') {
+      return true
+    }
+    const children = (node as ElementNode | RootNode).children
+    if (Array.isArray(children)) {
+      stack.push(...children)
+    }
+  }
+  return false
 }
 
 /**
@@ -65,7 +85,7 @@ function ensureCoreImport(sfcContext: VMSSFCContext, specifierName: string): voi
   }
 }
 
-async function extractSetupBodyUsingAST(
+function extractSetupBodyUsingAST(
   scriptContent: string | undefined,
   returnValue: t.ObjectExpression,
   bridgedFunctions: Set<string>,
@@ -438,21 +458,9 @@ async function extractSetupBodyUsingAST(
       setupBody.push(t.returnStatement(t.identifier('__vmsRenderState')))
     }
   } else {
-    // 没有内联函数，但需要处理导入的变量
-    if (importProperties.length > 0) {
-      // 从 returnValue 中移除导入的变量，然后重新构建
-      const nonImportProperties = returnValue.properties.filter((prop) => {
-        if (t.isObjectProperty(prop) && t.isIdentifier(prop.key)) {
-          return !(scriptScope && isImportVariable(prop.key.name, scriptScope))
-        }
-        return true
-      })
-      const newReturnValue = t.objectExpression([...nonImportProperties, ...importProperties])
-      setupBody.push(t.returnStatement(newReturnValue))
-    } else {
-      // 没有导入的变量，保持原有逻辑
-      setupBody.push(t.returnStatement(returnValue))
-    }
+    // 没有内联函数：returnValue 中的 shorthand 属性（含导入变量）在 setup 内
+    // 直接引用模块作用域，无需额外处理
+    setupBody.push(t.returnStatement(returnValue))
   }
 
   const setupFunAst = t.objectMethod(
@@ -467,7 +475,7 @@ async function extractSetupBodyUsingAST(
   }
 }
 
-export async function parseScript(
+export function parseScript(
   descriptor: SFCDescriptor,
   returnValue: t.ObjectExpression,
   bridgedFunctions: Set<string> = new Set(),
@@ -481,11 +489,11 @@ export async function parseScript(
   const scriptSetup = descriptor.scriptSetup
   const script = scriptSetup?.content
 
-  // 检查插槽使用
-  const hasSlots = checkSlotsUsage(descriptor.template?.content)
+  // 检查插槽使用（基于模板 AST 检测 <slot> 出口）
+  const hasSlots = checkSlotsUsage(descriptor.template?.ast)
 
   // 提取setup函数体（复用已解析的 AST，避免重复解析）
-  const { sfcContext, setupFunAst } = await extractSetupBodyUsingAST(
+  const { sfcContext, setupFunAst } = extractSetupBodyUsingAST(
     script,
     returnValue,
     bridgedFunctions,

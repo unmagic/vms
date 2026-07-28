@@ -6,7 +6,7 @@
   "main": "dist/index.js",
   "packageManager": "pnpm@10.28.2",
   "engines": {
-    "node": ">=22.17.1"
+    "node": ">=22"
   },
   "keywords": [
     "vms",
@@ -32,7 +32,7 @@
     "test:ui": "vitest --ui",
     "publish:ci": "npm publish",
     "link": "pnpm link --global",
-    "lint": "oxlint --fix ./src ./test",
+    "lint": "oxlint --fix ./src ./tests",
     "format": "oxfmt --write \"**/*.{js,cjs,ts,json,md}\"",
     "release": "tsx release.ts",
     "prepare": "husky"

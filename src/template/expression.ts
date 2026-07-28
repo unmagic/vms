@@ -13,18 +13,49 @@ import { type DirectiveNode, NodeTypes } from '@vue/compiler-core'
 import type { VMSCounter, VMSTemplateChildNode, VMSTransformContext } from '@/types/node'
 import { transformFromAstSync } from '@babel/core'
 import { parse } from '@babel/parser'
+import { generate } from '@babel/generator'
 import { WXS_NAMESPACE } from '@/utils/constants'
 import { createCompileError } from '@/utils/errorHandler'
 
 /**
- * 对 babel 输出的代码进行 WXS 兼容性清理
- * - $ → _（WXS 不支持 $ 标识符）
- * - void 0 → undefined（WXS 不支持 void 关键字）
+ * 清理标识符名称中 WXS 不支持的 $ 字符
  */
-export function sanitizeWxsCode(code: string): string {
-  return code
-    .replace(/[_a-zA-Z][$\w]*/g, (match) => match.replace(/[$]/g, '_'))
-    .replace(/void\s+0/g, 'undefined')
+export function sanitizeWxsIdentifierName(name: string): string {
+  return name.replace(/\$/g, '_')
+}
+
+/**
+ * 对降级后的 AST 进行 WXS 兼容性清理（AST 级处理，不会误伤字符串字面量）
+ * - 标识符中的 $ → _（WXS 不支持 $ 标识符）
+ * - void 0 → undefined（WXS 不支持 void 关键字）
+ * 使用 VISITOR_KEYS 驱动遍历，只访问有效子节点，避免触碰 loc 等元数据
+ */
+export function sanitizeWxsAst(node: t.Node): t.Node {
+  const visitorKeys = t.VISITOR_KEYS[node.type]
+  if (visitorKeys) {
+    for (const key of visitorKeys) {
+      const value = (node as unknown as Record<string, unknown>)[key]
+      if (Array.isArray(value)) {
+        for (let i = 0; i < value.length; i++) {
+          const child = value[i]
+          if (child && typeof child === 'object' && Object.hasOwn(child, 'type')) {
+            value[i] = sanitizeWxsAst(child as t.Node)
+          }
+        }
+      } else if (value && typeof value === 'object' && Object.hasOwn(value, 'type')) {
+        ;(node as unknown as Record<string, unknown>)[key] = sanitizeWxsAst(value as t.Node)
+      }
+    }
+  }
+
+  if (t.isIdentifier(node) && node.name.includes('$')) {
+    node.name = sanitizeWxsIdentifierName(node.name)
+  }
+  // void <任意表达式> 降级产物均为 void 0，统一替换为 undefined
+  if (t.isUnaryExpression(node) && node.operator === 'void') {
+    return t.identifier('undefined')
+  }
+  return node
 }
 
 export function makeBabelOptions() {
@@ -61,25 +92,28 @@ export function downlevelExpressionCode(expr: t.Expression): {
   if (!result?.code) {
     throw createCompileError('无法将表达式转换为 WXS 兼容语法', expr.loc)
   }
+  // parse 回 AST 锁定展开形式，并在 AST 层做 WXS 兼容清理（不会误伤字符串字面量）
   // babel 输出可能包含 var 声明（如可选链降级产生的 var _x;）
   // 分离声明和表达式语句——声明需要放入 WXS 函数体顶部，
   // 否则 WXS 中赋值未声明变量会成为模块级全局变量
-  const lines = result.code.trim().split('\n')
+  const statements = parseDownleveledCode(result.code).map(
+    (stmt) => sanitizeWxsAst(stmt) as t.Statement,
+  )
   const declarations: string[] = []
-  const exprLines: string[] = []
-  for (const line of lines) {
-    const trimmed = line.trim()
-    if (/^\s*var\s+/.test(trimmed)) {
-      declarations.push(trimmed)
-    } else if (trimmed) {
-      exprLines.push(trimmed)
+  const exprCodes: string[] = []
+  for (const stmt of statements) {
+    const code = generate(stmt, { jsescOption: { quotes: 'single' } }).code.trim()
+    if (t.isVariableDeclaration(stmt)) {
+      declarations.push(code)
+    } else if (code) {
+      exprCodes.push(code)
     }
   }
-  const code = exprLines
+  const code = exprCodes
     .join('\n')
     .trim()
     .replace(/;?\s*$/, '')
-  return { code: sanitizeWxsCode(code), declarations: declarations.join('\n') }
+  return { code, declarations: declarations.join('\n') }
 }
 
 /**
@@ -155,8 +189,10 @@ function getTemplateNodeProp(
         }
         const result = transformFromAstSync(programAST, originalExpression, makeBabelOptions())
         if (result?.code) {
-          const processedCode = sanitizeWxsCode(result.code)
-          const statements = parseDownleveledCode(processedCode)
+          // AST 级 WXS 兼容清理：标识符 $ → _、void 0 → undefined，不会篡改字符串字面量
+          const statements = parseDownleveledCode(result.code).map(
+            (stmt) => sanitizeWxsAst(stmt) as t.Statement,
+          )
           const lastIndex = statements.length - 1
           const wxsStmt = t.expressionStatement(
             t.assignmentExpression(
@@ -167,7 +203,8 @@ function getTemplateNodeProp(
               ),
               t.functionExpression(
                 null,
-                variables.map((item) => t.identifier(item)),
+                // 函数形参同步清理 $，与函数体内被重命名的引用保持一致
+                variables.map((item) => t.identifier(sanitizeWxsIdentifierName(item))),
                 t.blockStatement(
                   typeof wxsStatementsFun === 'function'
                     ? wxsStatementsFun(statements, lastIndex)

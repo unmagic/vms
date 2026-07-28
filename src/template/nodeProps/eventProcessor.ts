@@ -256,6 +256,14 @@ function processCallableExpression(
       returnValue,
       arrowFunctionArgumentNames,
     )
+  } else {
+    // 其他 callee 形式（如 a.b.c()、a?.b()、a[b]() 的多层/可选/计算访问）暂不支持，
+    // 显式报错而非生成未注册的空事件处理器，避免运行时静默失效
+    throw createCompileError(
+      `暂不支持的事件处理表达式：${generate(callee, { compact: true }).code}，` +
+        `请改用方法引用（onTap）、单层成员方法（obj.onTap）或内联箭头函数`,
+      callee.loc,
+    )
   }
 
   ctx.needsProxyRefs = true
@@ -612,7 +620,7 @@ function processEventName(
       content,
     }
   } else {
-    throw createCompileError('事件名必须是简单表达式：' + prop.arg, prop.loc)
+    throw createCompileError('事件名必须是简单表达式：' + prop.loc.source, prop.loc)
   }
 }
 

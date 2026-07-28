@@ -10,7 +10,7 @@ import t from '@babel/types'
 import { replacePlugin } from 'rolldown/plugins'
 import chokidar from 'chokidar'
 import fs from 'fs-extra'
-import { bold, green } from 'kolorist'
+import { bold, green, yellow } from 'kolorist'
 import { getPackageInfo } from 'local-pkg'
 import path from 'node:path'
 import os from 'node:os'
@@ -257,7 +257,11 @@ const builtLibraries: string[] = []
 const bundledModules = new Map<string, Set<string>>()
 async function bundleModule(module: string, pkg: string) {
   const bundled = bundledModules.get(pkg)
-  if (bundled?.has(module) || builtLibraries.some((library) => module.startsWith(library))) {
+  if (
+    bundled?.has(module) ||
+    // 精确到包名或子路径，避免已构建的 foo 误拦截 foo-bar
+    builtLibraries.some((library) => module === library || module.startsWith(library + '/'))
+  ) {
     return false
   }
   if (bundled) {
@@ -594,198 +598,208 @@ async function dev() {
   __PROD__ = false
 
   const t0 = Date.now()
-  // 复制polyfill文件
-  copyPolyfillFiles()
-    .then(() => {
-      console.log(bold(green(`[timing] copyPolyfillFiles: ${Date.now() - t0}ms`)))
-      return copyProjectConfigFile()
-    })
-    .then(() => {
-      console.log(bold(green(`[timing] copyProjectConfigFile: ${Date.now() - t0}ms`)))
-      return loadPagePaths()
-    })
-    .then(() => {
-      console.log(bold(green(`[timing] loadPagePaths: ${Date.now() - t0}ms`)))
-      return findIndependentPackages()
-    })
-    .then(() => {
-      console.log(bold(green(`[timing] findIndependentPackages: ${Date.now() - t0}ms`)))
-      return scanDependencies()
-    })
-    .then(() => {
-      console.log(bold(green(`[timing] scanDependencies: ${Date.now() - t0}ms`)))
-      // 用于跟踪正在处理的文件，避免重复处理
-      const processingFiles = new Set<string>()
-      // 用于排队：编译期间又触发了 change 的文件
-      const pendingFiles = new Set<string>()
-      // 用于收集初始扫描的文件，进行批量并行处理
-      const initialFiles: string[] = []
-      let isInitialScan = true
+  // 启动阶段串行 await，任一环节失败都能被捕获，避免 unhandled rejection 直接崩掉进程
+  try {
+    await copyPolyfillFiles()
+    console.log(bold(green(`[timing] copyPolyfillFiles: ${Date.now() - t0}ms`)))
+    await copyProjectConfigFile()
+    console.log(bold(green(`[timing] copyProjectConfigFile: ${Date.now() - t0}ms`)))
+    await loadPagePaths()
+    console.log(bold(green(`[timing] loadPagePaths: ${Date.now() - t0}ms`)))
+    await findIndependentPackages()
+    console.log(bold(green(`[timing] findIndependentPackages: ${Date.now() - t0}ms`)))
+    await scanDependencies()
+    console.log(bold(green(`[timing] scanDependencies: ${Date.now() - t0}ms`)))
+  } catch (error: unknown) {
+    console.error(`❌ 开发服务启动失败：${getErrorMessage(error)}`)
+    process.exitCode = 1
+    return
+  }
 
-      chokidar
-        .watch([sourceDir], {
-          awaitWriteFinish: { stabilityThreshold: 100, pollInterval: 50 },
-          ignored: IGNORED_FILES,
-          usePolling: false,
-          interval: 100,
-        })
-        .on('add', (filePath) => {
-          if (isInitialScan) {
-            // 初始扫描阶段，收集文件用于批量处理
-            initialFiles.push(filePath)
-          } else {
-            // 运行时新增文件，立即处理
-            const promise = cb(filePath)
-            topLevelJobs?.push(promise)
-          }
-        })
-        .on('addDir', (dirPath) => {
-          // 新建目录时，在输出目录同步创建
-          const outputDir = getOutputPath(dirPath)
-          const promise = fs.ensureDir(outputDir)
-          topLevelJobs?.push(promise)
-        })
-        .on('unlink', async (filePath) => {
-          // 文件删除时同步删除目标文件
-          const outputPath = getOutputPath(filePath)
-          const basePath = outputPath.replace(/\.vue$/, '')
-          const filesToDelete = filePath.endsWith('.vue')
-            ? [`${basePath}.js`, `${basePath}.wxml`, `${basePath}.wxss`, `${basePath}.json`]
-            : [path.join(outputPath)]
+  // vms.config.* / .env* 不在 sourceDir 监听范围内且无法热生效，变更时仅提示重启
+  chokidar
+    .watch(['vms.config.js', 'vms.config.mjs', '.env', '.env.development', '.env.production'], {
+      ignoreInitial: true,
+    })
+    .on('all', (_event, filePath) => {
+      console.log(bold(yellow(`检测到 ${filePath} 变更，该配置不支持热更新，请重启 vms 后生效`)))
+    })
 
+  // 用于跟踪正在处理的文件，避免重复处理
+  const processingFiles = new Set<string>()
+  // 用于排队：编译期间又触发了 change 的文件
+  const pendingFiles = new Set<string>()
+  // 用于收集初始扫描的文件，进行批量并行处理
+  const initialFiles: string[] = []
+  let isInitialScan = true
+
+  chokidar
+    .watch([sourceDir], {
+      awaitWriteFinish: { stabilityThreshold: 100, pollInterval: 50 },
+      ignored: IGNORED_FILES,
+      usePolling: false,
+      interval: 100,
+    })
+    .on('add', (filePath) => {
+      if (isInitialScan) {
+        // 初始扫描阶段，收集文件用于批量处理
+        initialFiles.push(filePath)
+      } else {
+        // 运行时新增文件，立即处理
+        const promise = cb(filePath)
+        topLevelJobs?.push(promise)
+      }
+    })
+    .on('addDir', (dirPath) => {
+      // 新建目录时，在输出目录同步创建
+      const outputDir = getOutputPath(dirPath)
+      const promise = fs.ensureDir(outputDir)
+      topLevelJobs?.push(promise)
+    })
+    .on('unlink', async (filePath) => {
+      // 文件删除时同步删除目标文件
+      const outputPath = getOutputPath(filePath)
+      const basePath = outputPath.replace(/\.vue$/, '')
+      const filesToDelete = filePath.endsWith('.vue')
+        ? [`${basePath}.js`, `${basePath}.wxml`, `${basePath}.wxss`, `${basePath}.json`]
+        : [path.join(outputPath)]
+
+      try {
+        await Promise.all(filesToDelete.map((f) => fs.remove(f)))
+        // 同步移除缓存
+        pathCache.delete(filePath)
+        pageComponentCache.delete(filePath)
+      } catch (error: unknown) {
+        console.warn(`删除目标文件失败：${filesToDelete.join(', ')}`, getErrorMessage(error))
+      }
+    })
+    .on('unlinkDir', async (dirPath) => {
+      // 目录删除时同步删除输出目录
+      const outputDir = getOutputPath(dirPath)
+      try {
+        await fs.remove(outputDir)
+      } catch (error: unknown) {
+        console.warn(`删除目标目录失败：${outputDir}`, getErrorMessage(error))
+      }
+    })
+    .on('change', async (filePath) => {
+      // 如果 app.json 变更，清空所有缓存并重新加载页面路径
+      if (filePath.endsWith('app.json')) {
+        console.log(bold(green('检测到 app.json 变更，清空缓存并重新加载页面路径...')))
+        clearAllCaches()
+        await loadPagePaths()
+      }
+
+      // 如果文件正在处理中，标记需要重新处理（排队一次），不直接丢弃
+      if (processingFiles.has(filePath)) {
+        pendingFiles.add(filePath)
+        return
+      }
+
+      // 使用循环代替递归，避免调用栈过深
+      const runCompile = async (initialPath: string) => {
+        let targetPath: string | null = initialPath
+        while (targetPath) {
+          processingFiles.add(targetPath)
+          const date = Date.now()
+          console.log(bold(green(`文件已修改：${targetPath}`)))
           try {
-            await Promise.all(filesToDelete.map((f) => fs.remove(f)))
-            // 同步移除 pathCache 中的缓存
-            pathCache.delete(filePath)
-          } catch (error: unknown) {
-            console.warn(`删除目标文件失败：${filesToDelete.join(', ')}`, getErrorMessage(error))
-          }
-        })
-        .on('unlinkDir', async (dirPath) => {
-          // 目录删除时同步删除输出目录
-          const outputDir = getOutputPath(dirPath)
-          try {
-            await fs.remove(outputDir)
-          } catch (error: unknown) {
-            console.warn(`删除目标目录失败：${outputDir}`, getErrorMessage(error))
-          }
-        })
-        .on('change', async (filePath) => {
-          // 如果 app.json 变更，清空所有缓存并重新加载页面路径
-          if (filePath.endsWith('app.json')) {
-            console.log(bold(green('检测到 app.json 变更，清空缓存并重新加载页面路径...')))
-            clearAllCaches()
-            await loadPagePaths()
-          }
-
-          // 如果文件正在处理中，标记需要重新处理（排队一次），不直接丢弃
-          if (processingFiles.has(filePath)) {
-            pendingFiles.add(filePath)
-            return
-          }
-
-          // 使用循环代替递归，避免调用栈过深
-          const runCompile = async (initialPath: string) => {
-            let targetPath: string | null = initialPath
-            while (targetPath) {
-              processingFiles.add(targetPath)
-              const date = Date.now()
-              console.log(bold(green(`文件已修改：${targetPath}`)))
-              try {
-                await cb(targetPath)
-                console.log(bold(green(`文件已处理完毕，耗时：${Date.now() - date}ms`)))
-              } finally {
-                processingFiles.delete(targetPath)
-                // ✅ 修复：从 pendingFiles 中取下一个待处理的文件
-                const nextFile = Array.from(pendingFiles)[0]
-                if (nextFile) {
-                  pendingFiles.delete(nextFile)
-                  targetPath = nextFile
-                } else {
-                  targetPath = null
-                }
-              }
+            await cb(targetPath)
+            console.log(bold(green(`文件已处理完毕，耗时：${Date.now() - date}ms`)))
+          } finally {
+            processingFiles.delete(targetPath)
+            // 只消费当前文件自己的重编标记；不能取队首任意文件，
+            // 否则会“偷取”其他文件的排队，导致同一文件被两个循环并发重复编译
+            if (pendingFiles.has(targetPath)) {
+              pendingFiles.delete(targetPath)
+              // targetPath 不变，继续循环重新编译该文件
+            } else {
+              targetPath = null
             }
           }
+        }
+      }
 
-          await runCompile(filePath)
-        })
-        .on('ready', async () => {
-          // 标记初始扫描完成
-          isInitialScan = false
+      await runCompile(filePath)
+    })
+    .on('ready', async () => {
+      // 初始批量编译失败不应以 unhandled rejection 崩掉 watch 进程
+      try {
+        // 标记初始扫描完成
+        isInitialScan = false
+        console.log(
+          bold(
+            green(
+              `[timing] chokidar ready（文件扫描完成）: ${Date.now() - t0}ms，共 ${initialFiles.length} 个文件`,
+            ),
+          ),
+        )
+
+        // 统计文件类型
+        const vueFiles = initialFiles.filter((f) => f.endsWith('.vue'))
+        const tsFiles = initialFiles.filter((f) => f.endsWith('.ts') || f.endsWith('.js'))
+        const otherFiles = initialFiles.filter(
+          (f) => !f.endsWith('.vue') && !f.endsWith('.ts') && !f.endsWith('.js'),
+        )
+        console.log(
+          bold(
+            green(
+              `[timing] 文件分布：vue=${vueFiles.length}, ts/js=${tsFiles.length}, 其他=${otherFiles.length}`,
+            ),
+          ),
+        )
+
+        // 文件处理器（带计时）
+        let vueTime = 0,
+          tsTime = 0,
+          otherTime = 0
+        const fileProcessor = async (filePath: string) => {
+          await cb(filePath, {
+            vueCb: (elapsed) => {
+              vueTime += elapsed
+            },
+            jsCb: (elapsed) => {
+              tsTime += elapsed
+            },
+            othersCb: (elapsed) => {
+              otherTime += elapsed
+            },
+          })
+        }
+
+        // 使用批量并行处理初始文件（开发模式使用更高并发）
+        if (initialFiles.length > 0) {
+          console.log(
+            bold(
+              green(`开始并行处理 ${initialFiles.length} 个文件（并发=${CONCURRENT_LIMIT}）...`),
+            ),
+          )
+          const processStartTime = Date.now()
+          await batchProcess(initialFiles, fileProcessor, CONCURRENT_LIMIT)
           console.log(
             bold(
               green(
-                `[timing] chokidar ready（文件扫描完成）: ${Date.now() - t0}ms，共 ${initialFiles.length} 个文件`,
+                `[timing] 并行处理完成：${Date.now() - processStartTime}ms（总耗时 ${Date.now() - t0}ms）`,
               ),
             ),
-          )
-
-          // 统计文件类型
-          const vueFiles = initialFiles.filter((f) => f.endsWith('.vue'))
-          const tsFiles = initialFiles.filter((f) => f.endsWith('.ts') || f.endsWith('.js'))
-          const otherFiles = initialFiles.filter(
-            (f) => !f.endsWith('.vue') && !f.endsWith('.ts') && !f.endsWith('.js'),
           )
           console.log(
             bold(
-              green(
-                `[timing] 文件分布：vue=${vueFiles.length}, ts/js=${tsFiles.length}, 其他=${otherFiles.length}`,
-              ),
+              green(`[timing] 耗时分布：vue=${vueTime}ms, ts/js=${tsTime}ms, 其他=${otherTime}ms`),
             ),
           )
+        }
 
-          // 文件处理器（带计时）
-          let vueTime = 0,
-            tsTime = 0,
-            otherTime = 0
-          const fileProcessor = async (filePath: string) => {
-            await cb(filePath, {
-              vueCb: (elapsed) => {
-                vueTime += elapsed
-              },
-              jsCb: (elapsed) => {
-                tsTime += elapsed
-              },
-              othersCb: (elapsed) => {
-                otherTime += elapsed
-              },
-            })
-          }
-
-          // 使用批量并行处理初始文件（开发模式使用更高并发）
-          if (initialFiles.length > 0) {
-            console.log(
-              bold(
-                green(`开始并行处理 ${initialFiles.length} 个文件（并发=${CONCURRENT_LIMIT}）...`),
-              ),
-            )
-            const processStartTime = Date.now()
-            await batchProcess(initialFiles, fileProcessor, CONCURRENT_LIMIT)
-            console.log(
-              bold(
-                green(
-                  `[timing] 并行处理完成：${Date.now() - processStartTime}ms（总耗时 ${Date.now() - t0}ms）`,
-                ),
-              ),
-            )
-            console.log(
-              bold(
-                green(
-                  `[timing] 耗时分布：vue=${vueTime}ms, ts/js=${tsTime}ms, 其他=${otherTime}ms`,
-                ),
-              ),
-            )
-          }
-
-          await Promise.all(bundleJobs!)
-          console.log(bold(green(`启动完成，耗时：${Date.now() - startTime}ms`)))
-          console.log(bold(green('监听文件变化中...')))
-          // Release memory.
-          topLevelJobs = null
-          bundleJobs = null
-          // 开发模式下不清空缓存，保持性能优势
-        })
+        await Promise.all(bundleJobs!)
+        console.log(bold(green(`启动完成，耗时：${Date.now() - startTime}ms`)))
+        console.log(bold(green('监听文件变化中...')))
+        // Release memory.
+        topLevelJobs = null
+        bundleJobs = null
+        // 开发模式下不清空缓存，保持性能优势
+      } catch (error: unknown) {
+        console.error(`❌ 初始编译失败：${getErrorMessage(error)}`)
+      }
     })
 }
 

@@ -81,7 +81,7 @@ export async function transformVueToMiniProgram(
 
     // 3. 转换 script（纯模板组件传递 null 作为 scriptSetup）
     //    传入已解析的 AST，避免重复解析
-    const result = await parseScript(
+    const result = parseScript(
       descriptor,
       returnValue,
       bridgedFunctions,
@@ -178,10 +178,8 @@ async function writeFileIfChangedAsync(filePath: string, newContent: string): Pr
 
     // 文件大小相同，使用流式 MD5 哈希比较
     // 使用流式读取避免大文件内存占用（如旧文件曾达到 500KB+）
-    const [existingHash, newHash] = await Promise.all([
-      streamHash(filePath),
-      Promise.resolve(stringHash(newContent)),
-    ])
+    const newHash = stringHash(newContent)
+    const existingHash = await streamHash(filePath)
     if (existingHash === newHash) {
       return // 内容相同，跳过写入
     }

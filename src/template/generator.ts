@@ -4,7 +4,23 @@ import type { VMSCodegenNode, VMSCodegenProp } from '@/types/node'
 import { getCodegenNode } from './tools'
 
 function createAttr(prop: VMSCodegenProp, key: string): string {
-  return typeof prop?.content === 'undefined' ? ` ${key}` : ` ${key}="${prop.content}"`
+  return typeof prop?.content === 'undefined' ? ` ${key}` : ` ${key}="${escapeAttr(prop.content)}"`
+}
+
+/**
+ * 转义静态属性值中的 XML 特殊字符（& 需先转义）
+ * 含 {{ }} 的动态值不转义，避免破坏表达式内部的引号与运算符
+ */
+function escapeAttr(value: string): string {
+  if (value.includes('{{')) return value
+  return value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;')
+}
+
+/**
+ * 转义静态文本节点中的 XML 特殊字符（插值节点原样输出，不经过此函数）
+ */
+function escapeText(text: string): string {
+  return text.replace(/&/g, '&amp;').replace(/</g, '&lt;')
 }
 
 class WXMLGenerator {
@@ -118,7 +134,14 @@ class WXMLGenerator {
   }
 
   private generateLeafNode(node: VMSCodegenNode): void {
-    this.code.push(node.content || '')
+    if (node.type === NodeTypes.TEXT) {
+      this.code.push(escapeText(node.content || ''))
+    } else if (node.type === NodeTypes.COMMENT) {
+      // 注释节点需包裹注释语法，避免内容被当作文本渲染
+      this.code.push(`<!-- ${node.content || ''} -->`)
+    } else {
+      this.code.push(node.content || '')
+    }
   }
 
   private shouldIndentChildren(node: VMSCodegenNode): boolean {

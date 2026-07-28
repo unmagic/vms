@@ -4,7 +4,11 @@ import {
   getCodegenNodeProps,
   setCodegenNode,
 } from '../tools'
-import { downlevelExpressionCode, fallbackParseExpression } from '../expression'
+import {
+  downlevelExpressionCode,
+  fallbackParseExpression,
+  sanitizeWxsIdentifierName,
+} from '../expression'
 import * as t from '@babel/types'
 import type {
   VMSCounter,
@@ -96,7 +100,8 @@ export function transformTemplateClass(
               allDeclarations.length > 0 ? allDeclarations.join(' ') + ' ' : ''
 
             // 用降级后的代码字符串构建 WXS 函数源码
-            const params = variables.join(', ')
+            // 形参同步清理 $，与函数体内被重命名的引用保持一致（WXML 调用处保留原始变量名）
+            const params = variables.map(sanitizeWxsIdentifierName).join(', ')
             const returnExpr =
               downleveled.length === 1
                 ? downleveled[0].code

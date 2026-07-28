@@ -14,10 +14,3 @@ export async function runVMS(options: InputOptions) {
     return dev()
   }
 }
-// 运行主函数，在构建时移除该函数
-
-/*#__PURE__*/
-runVMS({
-  mode: 'development',
-  upload: false,
-})
