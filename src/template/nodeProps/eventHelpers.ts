@@ -3,6 +3,7 @@ import type { VForInfo } from '@/types/node'
 import type { ScriptScope } from '@/types/scope'
 import { getVForItemName, getVForIndexName, getVForSourceExpression } from '@/utils/tools'
 import { isImportVariable } from '@/script/scopeAnalyzer'
+import { buildDestructuredAccess, resolveDestructuredVar } from '../tools'
 
 export const EVENT_PARAM_NAME = '__vms_event'
 
@@ -182,6 +183,15 @@ export function buildProxyRefsArgument(
       const itemIndex = vForInfoList.findIndex((info) => getVForItemName(info) === arg.name)
       if (itemIndex !== -1) {
         return buildProxyRefsItemAccess(vForInfoList, itemIndex, scriptScope)
+      }
+    }
+
+    // 解构式 v-for 的变量：如 { id } 解构出的 id → item.id（item 通过 __vmsProxyRefs.list[index] 访问）
+    if (vForInfoList && vForInfoList.length > 0) {
+      const resolved = resolveDestructuredVar(arg.name, vForInfoList)
+      if (resolved) {
+        const itemAccess = buildProxyRefsItemAccess(vForInfoList, resolved.level, scriptScope)
+        return buildDestructuredAccess(itemAccess, resolved.path)
       }
     }
 

@@ -5,7 +5,7 @@
 
 import t from '@babel/types'
 import type { VForInfo, VMSTransformContext } from '@/types/node'
-import { addProperty } from '../tools'
+import { addProperty, resolveDestructuredVar } from '../tools'
 import { getVForIndexName } from '@/utils/tools'
 import {
   isPropsVariable,
@@ -113,6 +113,11 @@ export function collectExternalVarsFromArgs(
         GLOBAL_WHITELIST.has(name) ||
         (arrowFunctionArgumentNames && arrowFunctionArgumentNames.has(name))
       ) {
+        return
+      }
+
+      // 解构式 v-for 的变量（如 { id } 解构出的 id）不属于 setup 变量，跳过
+      if (vForInfoList && resolveDestructuredVar(name, vForInfoList)) {
         return
       }
 

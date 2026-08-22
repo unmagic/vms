@@ -283,17 +283,30 @@ function extractSetupBodyUsingAST(
       t.isObjectProperty(prop) && t.isIdentifier(prop.key) && prop.key.name.startsWith('__fun_'),
   )
 
+  // 检查是否有 computed 绑定（returnValue 中值为 computed(...) 的属性）
+  const hasComputedBindings = returnValue.properties.some(
+    (prop) =>
+      t.isObjectProperty(prop) &&
+      t.isCallExpression(prop.value) &&
+      t.isIdentifier(prop.value.callee, { name: 'computed' }),
+  )
+
   // 预先定义变量收集容器（在 if/else 块外部定义，以便在整个函数中使用）
   const inlineFunctions: t.ObjectProperty[] = []
   const renderProperties: (t.ObjectProperty | t.ObjectMethod | t.SpreadElement)[] = []
   const internalProperties: (t.ObjectProperty | t.ObjectMethod | t.SpreadElement)[] = []
   const importProperties: t.ObjectProperty[] = [] // 导入的变量，需要直接从模块作用域访问
 
-  // 如果有内联函数，需要添加 proxyRefs 支持
-  if (hasInlineFunctions) {
+  // 如果有内联函数或 computed 绑定，需要添加 proxyRefs 支持
+  if (hasInlineFunctions || hasComputedBindings) {
     // 只在实际需要 __vmsProxyRefs 时才导入 proxyRefs
     if (needsProxyRefs) {
       ensureCoreImport(sfcContext, 'proxyRefs')
+    }
+
+    // computed 绑定需要在 setup 内生成 computed
+    if (hasComputedBindings) {
+      ensureCoreImport(sfcContext, 'computed')
     }
 
     // 先收集 returnValue 中哪些 key 是"渲染用"（即模板直接绑定的变量）
@@ -359,6 +372,12 @@ function extractSetupBodyUsingAST(
     setupBody.forEach((statement) => {
       if (t.isFunctionDeclaration(statement) && statement.id) {
         if (bridgedFunctions.has(statement.id.name)) return
+        // 已在 returnValue 中收集过的函数（如 computed 绑定引用的函数）不重复添加
+        const alreadyInReturn = returnValue.properties.some(
+          (p) =>
+            t.isObjectProperty(p) && t.isIdentifier(p.key) && p.key.name === statement.id!.name,
+        )
+        if (alreadyInReturn) return
         const prop = t.objectProperty(
           t.identifier(statement.id.name),
           t.identifier(statement.id.name),

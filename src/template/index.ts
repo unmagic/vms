@@ -52,6 +52,7 @@ function parseTemplate(
     functionPropertyCounter: 0,
     nodeDataKeyIndex: 0,
     vForIndexCounter: 0,
+    computedCounter: 0,
     generateWxsFunctionName() {
       return `__wxs_${this.wxsFunctionCounter++}`
     },
@@ -60,6 +61,9 @@ function parseTemplate(
     },
     generateVForIndexName(forItem: string) {
       return `_${forItem}_${this.vForIndexCounter++}_index`
+    },
+    generateComputedName() {
+      return `__vmsComputed_${this.computedCounter++}`
     },
   }
 

@@ -236,8 +236,8 @@ export function getVariableInfo(name: string, scope: ScriptScope): VariableInfo 
   if (scope.imports.has(name)) return scope.imports.get(name)
   if (scope.declarations.has(name)) return scope.declarations.get(name)
 
-  // 检查全局变量
-  if (isGlobalVariable(name)) {
+  // 检查全局变量（同时缓存到 scope.globals，供 isGlobalVariableInScope 复用）
+  if (checkAndMarkGlobal(name, scope)) {
     return {
       name,
       source: {

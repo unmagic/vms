@@ -90,8 +90,16 @@ function parseForVariables(
     return undefined
   }
 
-  const forItem =
-    directive.forParseResult.value?.type === NodeTypes.SIMPLE_EXPRESSION
+  // 解构式 item（如 { id, name } / [a, b]）在 WXML 中统一用默认的 'item' 名
+  const valueAst = directive.forParseResult.value?.ast
+  const isDestructured =
+    valueAst?.type === 'ArrowFunctionExpression' &&
+    (valueAst.params?.[0]?.type === 'ObjectPattern' ||
+      valueAst.params?.[0]?.type === 'ArrayPattern')
+
+  const forItem = isDestructured
+    ? 'item'
+    : directive.forParseResult.value?.type === NodeTypes.SIMPLE_EXPRESSION
       ? directive.forParseResult.value.content
       : 'item'
 

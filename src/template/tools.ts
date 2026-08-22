@@ -1,6 +1,7 @@
 import { getComponentMatcher, VMS_FIXED_TAG_PREFIX } from '@/utils/constants'
 import * as t from '@babel/types'
 import { getExpressionTSAst, getIdentifiersWithoutVForVariables } from '@/utils/ast'
+import { parseDestructuredVars } from '@/utils/tools'
 import type {
   VForInfo,
   VMSCodegenNode,
@@ -449,13 +450,65 @@ export function getVForVariables(ctx: VMSTransformContext, node: object): Set<st
   for (const vForInfo of list) {
     const parseResult = vForInfo.forParseResult
     if (parseResult.value?.type === NodeTypes.SIMPLE_EXPRESSION) {
-      variables.add(parseResult.value.content)
+      if (vForInfo.destructuredVars && vForInfo.destructuredVars.size > 0) {
+        // 解构式 v-for：加入所有解构变量名
+        for (const varName of vForInfo.destructuredVars.keys()) {
+          variables.add(varName)
+        }
+        // 解构式统一 item 名为 'item'
+        variables.add('item')
+      } else {
+        variables.add(parseResult.value.content)
+      }
     }
     if (parseResult.key?.type === NodeTypes.SIMPLE_EXPRESSION) {
       variables.add(parseResult.key.content)
     }
   }
   return variables
+}
+
+/**
+ * 在 v-for 层级列表中查找解构变量名，返回其所属层级和 item 属性访问路径。
+ * 从最内层向外层查找，返回 null 表示不是解构变量。
+ */
+export function resolveDestructuredVar(
+  name: string,
+  vForInfoList: VForInfo[],
+): { path: string; level: number } | null {
+  for (let level = vForInfoList.length - 1; level >= 0; level--) {
+    const vars = vForInfoList[level].destructuredVars
+    if (vars?.has(name)) {
+      return { path: vars.get(name)!, level }
+    }
+  }
+  return null
+}
+
+/**
+ * 把解构变量的 item 属性访问路径（如 'name'、'user.name'、'[0]'、'arr[0].name'）
+ * 构建为以 root 为根的成员访问 AST。
+ * root 可以是简单标识符（WXML 场景）或已构建好的 item 访问表达式（事件/computed 场景）。
+ */
+export function buildDestructuredAccess(root: t.Expression, path: string): t.Expression {
+  let expr: t.Expression = root
+  // 按 '.' 分割属性名；每段可能包含 '[数字]' 数组索引
+  // 例如 'user.name' → ['user', 'name']；'arr[0].name' → ['arr[0]', 'name']；'[0]' → ['[0]']
+  const parts = path.split('.')
+  for (const part of parts) {
+    const propName = part.replace(/\[\d+\]/g, '')
+    if (propName) {
+      expr = t.memberExpression(expr, t.identifier(propName))
+    }
+    const indexMatches = part.match(/\[(\d+)\]/g)
+    if (indexMatches) {
+      for (const m of indexMatches) {
+        const idx = Number(m.slice(1, -1))
+        expr = t.memberExpression(expr, t.numericLiteral(idx), true)
+      }
+    }
+  }
+  return expr
 }
 
 /**
@@ -519,6 +572,11 @@ export function assignVForInfoListMinimal(
         parent: parentVForInfoList?.length
           ? parentVForInfoList[parentVForInfoList.length - 1]
           : undefined,
+      }
+      // 解析解构式 item 的变量映射（如 { id, name } → id/name）
+      const destructuredVars = parseDestructuredVars(vForInfo)
+      if (destructuredVars.size > 0) {
+        vForInfo.destructuredVars = destructuredVars
       }
       const newVForInfoList = parentVForInfoList ? [...parentVForInfoList, vForInfo] : [vForInfo]
       setVForInfoList(ctx, node, newVForInfoList)

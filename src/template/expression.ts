@@ -1,16 +1,30 @@
-import { extractVariablesFromExpressionAST } from '@/utils/ast'
+import { extractVariablesFromExpressionAST, getExpressionTSAst } from '@/utils/ast'
 import {
+  addRenderProperty,
+  buildDestructuredAccess,
   collectBindingVarsWithAST,
   collectBindingVarsWithVarName,
   collectBindingVarsWithVarNameList,
   containsExternalFunctionInExpression,
+  getVForInfoList,
+  getVForVariables,
   isComplexExpression,
+  resolveDestructuredVar,
   type ExpressionCacheEntry,
 } from './tools'
+import { rewriteExpressionVars } from './nodeProps/inlineHandler'
+import {
+  isGlobalVariableInScope,
+  isImportVariable,
+  isMacroVariable,
+  isPropsVariable,
+} from '@/script/scopeAnalyzer'
+import { getVForItemName, getVForSourceExpression } from '@/utils/tools'
 import { detectPolyfillMethods, applyPolyfillTransform } from './wxsPolyfill'
 import * as t from '@babel/types'
 import { type DirectiveNode, NodeTypes } from '@vue/compiler-core'
-import type { VMSCounter, VMSTemplateChildNode, VMSTransformContext } from '@/types/node'
+import type { VForInfo, VMSCounter, VMSTemplateChildNode, VMSTransformContext } from '@/types/node'
+import type { ScriptScope } from '@/types/scope'
 import { transformFromAstSync } from '@babel/core'
 import { parse } from '@babel/parser'
 import { generate } from '@babel/generator'
@@ -155,6 +169,218 @@ export function fallbackParseExpression(
   }
 }
 
+/**
+ * 递归改写表达式 AST 中的解构变量（如 { id, name } 解构出的 id/name）
+ * 为 item 属性访问（item.id / item.name）。用于 WXML 文本插值与属性绑定。
+ */
+function rewriteDestructuredVarsInAst(expr: t.Expression, vForInfoList: VForInfo[]): t.Expression {
+  const process = (node: t.Expression): t.Expression => {
+    if (t.isIdentifier(node)) {
+      const resolved = resolveDestructuredVar(node.name, vForInfoList)
+      if (resolved) return buildDestructuredAccess(t.identifier('item'), resolved.path)
+      return node
+    }
+    if (t.isMemberExpression(node)) {
+      return t.memberExpression(process(node.object as t.Expression), node.property, node.computed)
+    }
+    if (t.isOptionalMemberExpression(node)) {
+      return t.optionalMemberExpression(
+        process(node.object as t.Expression),
+        node.property,
+        node.computed,
+        node.optional,
+      )
+    }
+    if (t.isCallExpression(node)) {
+      return t.callExpression(
+        process(node.callee as t.Expression),
+        node.arguments.map((arg) =>
+          t.isSpreadElement(arg) || t.isArgumentPlaceholder(arg)
+            ? arg
+            : process(arg as t.Expression),
+        ),
+      )
+    }
+    if (t.isConditionalExpression(node)) {
+      return t.conditionalExpression(
+        process(node.test),
+        process(node.consequent),
+        process(node.alternate),
+      )
+    }
+    if (t.isLogicalExpression(node)) {
+      return t.logicalExpression(
+        node.operator,
+        process(node.left as t.Expression),
+        process(node.right as t.Expression),
+      )
+    }
+    if (t.isBinaryExpression(node)) {
+      return t.binaryExpression(
+        node.operator,
+        process(node.left as t.Expression),
+        process(node.right as t.Expression),
+      )
+    }
+    if (t.isUnaryExpression(node)) {
+      return t.unaryExpression(node.operator, process(node.argument as t.Expression))
+    }
+    if (t.isTemplateLiteral(node)) {
+      return t.templateLiteral(
+        node.quasis,
+        node.expressions.map((e) => process(e as t.Expression)),
+      )
+    }
+    return node
+  }
+  return process(expr)
+}
+
+/**
+ * 判断变量是否应被改写为 __vmsProxyRefs 访问。
+ * props、props 整体变量、import、macro、global 都不需要改写。
+ */
+function isCollectableDeclaration(name: string, scriptScope?: ScriptScope): boolean {
+  if (!scriptScope) return true
+  if (name === scriptScope.propsVarName || name === scriptScope.propsRestName) return false
+  return (
+    !isPropsVariable(name, scriptScope) &&
+    !isImportVariable(name, scriptScope) &&
+    !isMacroVariable(name, scriptScope) &&
+    !isGlobalVariableInScope(name, scriptScope)
+  )
+}
+
+/**
+ * 确保 v-for 的 index 变量名已生成（供 computed 绑定在 WXML 中按索引取值）。
+ * 若 transformVForProp 尚未处理该 v-for，则先补生成并写回 forParseResult，
+ * 保证后续 wx:for-index 使用同一名称。
+ */
+function ensureVForIndexName(vForInfo: VForInfo, counter: VMSCounter): string {
+  const key = vForInfo.forParseResult?.key
+  if (key?.type === NodeTypes.SIMPLE_EXPRESSION && key.content) {
+    return key.content
+  }
+  const generated = counter.generateVForIndexName(getVForItemName(vForInfo))
+  vForInfo.forParseResult.key = {
+    type: NodeTypes.SIMPLE_EXPRESSION,
+    content: generated,
+    isStatic: false,
+    constType: 0,
+    loc: vForInfo.forParseResult.value?.loc,
+  }
+  return generated
+}
+
+/**
+ * 生成 v-for 场景下的 computed 绑定（支持嵌套 v-for）。
+ * 例如嵌套 v-for 下的 :title="fmt(col.name)" 会编译为：
+ *   computed(() => rows.map(row => row.cols.map(col => fmt(col.name))))
+ * WXML 中按多层 index 取值：title="{{__vmsComputed_0[rowIndex][colIndex]}}"
+ */
+function generateVForComputedBinding(
+  ast: t.Expression,
+  freeVars: string[],
+  vForInfoList: VForInfo[],
+  returnValue: t.ObjectExpression,
+  counter: VMSCounter,
+  ctx: VMSTransformContext,
+): ExpressionCacheEntry {
+  const scriptScope = ctx.scriptScope
+
+  // 预生成所有层级的 index 名，保证与 wx:for-index 一致
+  const indexNames: string[] = []
+  for (const info of vForInfoList) {
+    indexNames.push(ensureVForIndexName(info, counter))
+  }
+
+  // 收集所有 v-for 的 item/index 临时变量名
+  const allVForVars = new Set<string>()
+  const allItemNames: string[] = []
+  for (let i = 0; i < vForInfoList.length; i++) {
+    // 与 transformVForProp 的 parseForVariables 保持一致：
+    // 非简单标识符的 item（如解构）默认名为 'item'
+    const itemName = getVForItemName(vForInfoList[i]) || 'item'
+    allVForVars.add(itemName)
+    allItemNames.push(itemName)
+    allVForVars.add(indexNames[i])
+    // 解构变量名也属于 v-for 临时变量，不应被改写为 __vmsProxyRefs
+    if (vForInfoList[i].destructuredVars) {
+      for (const varName of vForInfoList[i].destructuredVars!.keys()) {
+        allVForVars.add(varName)
+      }
+    }
+  }
+
+  // 改写用户表达式中的 setup 变量（排除所有 v-for 临时变量），再改写解构变量为 item 属性访问
+  const varsToCollect = new Set(
+    freeVars.filter(
+      (name) => !allVForVars.has(name) && isCollectableDeclaration(name, scriptScope),
+    ),
+  )
+  const rewrittenExpr = rewriteDestructuredVarsInAst(
+    rewriteExpressionVars(ast, varsToCollect, undefined, ctx),
+    vForInfoList,
+  )
+
+  // 从最内层向外层逐级包裹 .map()
+  let innerExpr = rewrittenExpr
+  for (let level = vForInfoList.length - 1; level >= 0; level--) {
+    const info = vForInfoList[level]
+    const sourceExpr = getVForSourceExpression(info)
+
+    // 外层 item 名：source 表达式可能引用它们，不应改写
+    const outerItemNames = new Set(allItemNames.slice(0, level))
+
+    const sourceAst = getExpressionTSAst(sourceExpr) as unknown as t.Expression
+    const sourceVars = extractVariablesFromExpressionAST(sourceAst)
+    const sourceVarsToCollect = new Set(
+      sourceVars.filter(
+        (name) => !outerItemNames.has(name) && isCollectableDeclaration(name, scriptScope),
+      ),
+    )
+    const rewrittenSource = rewriteExpressionVars(sourceAst, sourceVarsToCollect, undefined, ctx)
+
+    // map 回调参数：始终包含 item，若用户表达式引用该层 index 则追加
+    const mapParams: t.Identifier[] = [t.identifier(allItemNames[level])]
+    if (freeVars.includes(indexNames[level])) {
+      mapParams.push(t.identifier(indexNames[level]))
+    }
+
+    innerExpr = t.callExpression(t.memberExpression(rewrittenSource, t.identifier('map')), [
+      t.arrowFunctionExpression(mapParams, innerExpr),
+    ])
+
+    // 收集 source 中引用的 setup 变量（排除 v-for 临时变量）
+    sourceVars.forEach((name) => {
+      if (!allVForVars.has(name)) addRenderProperty(returnValue, name, ctx)
+    })
+  }
+
+  const computedName = counter.generateComputedName()
+  const computedCall = t.callExpression(t.identifier('computed'), [
+    t.arrowFunctionExpression([], innerExpr),
+  ])
+
+  returnValue.properties.push(t.objectProperty(t.identifier(computedName), computedCall))
+  ctx.renderVars.add(computedName)
+  ctx.needsProxyRefs = true
+
+  // 收集用户表达式引用的 setup 变量（排除 v-for 临时变量）
+  freeVars.forEach((name) => {
+    if (!allVForVars.has(name)) addRenderProperty(returnValue, name, ctx)
+  })
+
+  // WXML：按所有层级 index 依次取值
+  let wxmlContent = `{{${computedName}`
+  for (const idx of indexNames) {
+    wxmlContent += `[${idx}]`
+  }
+  wxmlContent += `}}`
+
+  return { content: wxmlContent }
+}
+
 function getTemplateNodeProp(
   node: VMSTemplateChildNode,
   prop: Pick<DirectiveNode, 'exp' | 'loc'>,
@@ -231,10 +457,67 @@ function getTemplateNodeProp(
           throw createCompileError('无法将表达式转换为es5语法', prop.loc)
         }
       } else {
-        throw createCompileError('无法处理表达式', prop.loc)
+        // 表达式包含 setup 函数调用（WXS 无法访问 setup 作用域），
+        // 改为在 setup 内生成 computed 求值并暴露为渲染变量
+        const scriptScope = ctx.scriptScope
+        const freeVars = extractVariablesFromExpressionAST(ast)
+
+        // v-for 场景：函数参数引用了 v-for 临时变量，预计算为数组再按索引取值
+        const vForInfoList = getVForInfoList(ctx, node)
+        if (vForInfoList && vForInfoList.length > 0) {
+          const vForVars = getVForVariables(ctx, node)
+          if (freeVars.some((name) => vForVars.has(name))) {
+            return generateVForComputedBinding(
+              ast as unknown as t.Expression,
+              freeVars,
+              vForInfoList,
+              returnValue,
+              counter,
+              ctx,
+            )
+          }
+        }
+
+        const computedName = counter.generateComputedName()
+
+        // 仅声明变量改写为 __vmsProxyRefs 访问；props/import/global 由 rewriteExpressionVars 内部处理
+        const varsToCollect = new Set(
+          freeVars.filter((name) => isCollectableDeclaration(name, scriptScope)),
+        )
+
+        const rewritten = rewriteExpressionVars(
+          ast as unknown as t.Expression,
+          varsToCollect,
+          undefined,
+          ctx,
+        )
+
+        const computedCall = t.callExpression(t.identifier('computed'), [
+          t.arrowFunctionExpression([], rewritten),
+        ])
+
+        returnValue.properties.push(t.objectProperty(t.identifier(computedName), computedCall))
+        ctx.renderVars.add(computedName)
+        ctx.needsProxyRefs = true
+
+        // 收集表达式引用的 setup 变量，确保进入 __vmsRenderState 供 __vmsProxyRefs 访问
+        freeVars.forEach((name) => addRenderProperty(returnValue, name, ctx))
+
+        return {
+          content: `{{${computedName}}}`,
+        }
       }
     } else {
       collectBindingVarsWithAST(ast, node, returnValue, ctx)
+      // 解构式 v-for 变量改写为 item 属性访问（如 name → item.name）
+      const vForInfoList = getVForInfoList(ctx, node)
+      if (
+        vForInfoList &&
+        vForInfoList.some((info) => info.destructuredVars && info.destructuredVars.size > 0)
+      ) {
+        const rewrittenAst = rewriteDestructuredVarsInAst(ast as t.Expression, vForInfoList)
+        return { content: `{{${generate(rewrittenAst).code}}}` }
+      }
       return { content: `{{${originalExpression}}}` }
     }
   } else {
@@ -243,6 +526,15 @@ function getTemplateNodeProp(
       return { content: `{{${originalExpression}}}` }
     } else {
       collectBindingVarsWithVarName(originalExpression, node, returnValue, ctx)
+      // 解构式 v-for 的单个变量改写为 item 属性访问
+      const vForInfoList = getVForInfoList(ctx, node)
+      if (vForInfoList && vForInfoList.length > 0) {
+        const resolved = resolveDestructuredVar(originalExpression, vForInfoList)
+        if (resolved) {
+          const access = buildDestructuredAccess(t.identifier('item'), resolved.path)
+          return { content: `{{${generate(access).code}}}` }
+        }
+      }
       return { content: `{{${originalExpression}}}` }
     }
   }

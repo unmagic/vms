@@ -52,6 +52,27 @@ describe('插槽（Slot）测试', () => {
       // 不含 slot 时不应开启 multipleSlots
       expect(js).not.toContain('multipleSlots')
     })
+
+    it('1.4 使用方直接传入默认插槽内容（不写 template/v-slot）', async () => {
+      const vueContent = `
+<template>
+  <MyCard>
+    <text>直接默认内容</text>
+  </MyCard>
+</template>
+<script setup lang="ts">
+import MyCard from './MyCard.vue'
+</script>
+`
+      const { wxml, json, error } = await compileVueContent(vueContent)
+
+      expect(error).toBeNull()
+      // 直接内容作为默认插槽，不带 slot 属性
+      expect(wxml).toContain('<MyCard')
+      expect(wxml).toContain('直接默认内容')
+      expect(wxml).not.toContain('slot=')
+      expect(json?.usingComponents).toHaveProperty('MyCard')
+    })
   })
 
   describe('2. 具名插槽（使用方）', () => {

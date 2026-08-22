@@ -98,6 +98,15 @@ export interface VForInfo {
   // 元数据
   depth: number // 嵌套深度（0 表示最外层）
   parent?: VForInfo // 父级 v-for 信息（对于嵌套 v-for）
+
+  /**
+   * 解构式 v-for 的解构变量映射：解构变量名 → item 属性访问路径。
+   * 例如 v-for="{ id, name } in items" → { id: 'id', name: 'name' }
+   * v-for="{ id: userId } in items" → { userId: 'id' }
+   * v-for="{ user: { name } } in items" → { name: 'user.name' }
+   * v-for="[a, b] in items" → { a: '[0]', b: '[1]' }
+   */
+  destructuredVars?: Map<string, string>
 }
 
 export type VMSRootNode = RootNode
@@ -133,12 +142,16 @@ export interface VMSCounter {
   nodeDataKeyIndex: number
   // 生成 v-for 默认索引名的计数器，用于避免嵌套 v-for 索引名冲突
   vForIndexCounter: number
+  // 生成 computed 绑定变量名的计数器
+  computedCounter: number
 
   generateWxsFunctionName(): string
 
   generateFunctionPropertyName(): string
 
   generateVForIndexName(forItem: string): string
+
+  generateComputedName(): string
 }
 
 type MacroInfoVariable = {

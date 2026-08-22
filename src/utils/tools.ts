@@ -13,14 +13,65 @@ import {
 import { NodeTypes } from '@vue/compiler-core'
 
 /**
+ * 判断 v-for 的 item 是否为解构式（ObjectPattern / ArrayPattern）
+ */
+export function isDestructuredVFor(vForInfo: VForInfo): boolean {
+  const ast = vForInfo.forParseResult?.value?.ast
+  if (!ast || ast.type !== 'ArrowFunctionExpression') return false
+  const param = ast.params?.[0]
+  return param?.type === 'ObjectPattern' || param?.type === 'ArrayPattern'
+}
+
+/**
+ * 解析解构式 v-for 的变量映射。
+ * 返回 Map<解构变量名, item 属性访问路径>，非解构式返回空 Map。
+ */
+export function parseDestructuredVars(vForInfo: VForInfo): Map<string, string> {
+  const result = new Map<string, string>()
+  if (!isDestructuredVFor(vForInfo)) return result
+
+  const param = vForInfo.forParseResult.value.ast.params[0]
+
+  const walkObjectProps = (props: any[], prefix: string) => {
+    for (const prop of props) {
+      if (prop?.type !== 'ObjectProperty') continue
+      const key = prop.key?.type === 'Identifier' ? prop.key.name : null
+      if (key === null) continue
+      const path = prefix ? `${prefix}.${key}` : key
+      if (prop.value?.type === 'Identifier') {
+        result.set(prop.value.name, path)
+      } else if (prop.value?.type === 'ObjectPattern') {
+        walkObjectProps(prop.value.properties, path)
+      } else if (prop.value?.type === 'ArrayPattern') {
+        prop.value.elements.forEach((el: any, i: number) => {
+          if (el?.type === 'Identifier') result.set(el.name, `${path}[${i}]`)
+        })
+      }
+    }
+  }
+
+  if (param.type === 'ObjectPattern') {
+    walkObjectProps(param.properties, '')
+  } else if (param.type === 'ArrayPattern') {
+    param.elements.forEach((el: any, i: number) => {
+      if (el?.type === 'Identifier') result.set(el.name, `[${i}]`)
+    })
+  }
+
+  return result
+}
+
+/**
  * 从 VForInfo 中提取 item 名称
+ * 解构式 v-for 统一返回 'item'（WXML 的默认 for-item 名）
  */
 export function getVForItemName(vForInfo: VForInfo): string {
   const forParseResult = vForInfo.forParseResult
   if (forParseResult.value && forParseResult.value.type === NodeTypes.SIMPLE_EXPRESSION) {
+    if (isDestructuredVFor(vForInfo)) return 'item'
     return forParseResult.value.content
   }
-  return ''
+  return 'item'
 }
 
 /**
