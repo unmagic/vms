@@ -89,6 +89,8 @@ export interface VMSTransformResult {
   internalVars: Set<string>
   renderVars: Set<string>
   needsProxyRefs: boolean
+  /** 是否有作用域插槽（<slot :xxx="yyy">），需要 dynamicSlots: true */
+  hasDynamicSlots: boolean
 }
 
 export interface VForInfo {
@@ -131,6 +133,10 @@ export interface VMSTransformContext {
   scriptScope?: ScriptScope
   /** 模板根元素节点 */
   rootElementNode: null | TemplateChildNode
+  /** 是否有作用域插槽（<slot :xxx="yyy">），需要 dynamicSlots: true */
+  hasDynamicSlots: boolean
+  /** 作用域插槽的接收变量名（slot 数据，不属于组件 data，收集变量时需排除） */
+  scopedSlotVars: Set<string>
 }
 
 export interface VMSCounter {
@@ -156,7 +162,7 @@ export interface VMSCounter {
 
 type MacroInfoVariable = {
   path: NodePath<t.VariableDeclaration>
-  type: 'defineProps' | 'defineEmits' | 'defineContext'
+  type: 'defineProps' | 'defineEmits' | 'defineContext' | 'defineModel'
   decl: t.VariableDeclarator
 }
 

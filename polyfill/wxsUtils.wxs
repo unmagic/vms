@@ -1,3 +1,142 @@
+/**
+ * 将任意值转为字符串。
+ *
+ * WXS **没有 String 全局**（实测 typeof String === undefined），
+ * 因此不能调用 String(x)；用字符串拼接触发 ToString 达到同样效果
+ * （与编译器在模板中对 String(...) 做的改写一致）。
+ */
+function toWxsString(value) {
+  if (value === null || value === undefined) return ''
+  return '' + value
+}
+
+/**
+ * 写入对象属性，并保留 "__proto__" 这类特殊键。
+ *
+ * 在标准 JS 环境中，直接执行 target["__proto__"] = value 会触发原型
+ * setter，导致该键被静默丢弃（Object.fromEntries / Object.assign 均受影响），
+ * 因此需要 Object.defineProperty 定义自有属性。
+ *
+ * 但 WXS **没有 Object 全局**（实测 typeof Object === 'undefined'），
+ * 直接写 typeof Object.defineProperty 会抛错（在 undefined 上取属性）。
+ * 解决办法是先用 typeof Object !== 'undefined' 短路——typeof 对未声明
+ * 标识符安全，短路后根本不会求值 Object.defineProperty。
+ * 这样 Node 环境保留原型保护，WXS 环境安全退化为普通赋值
+ * （WXS 对象无原型链污染问题）。
+ */
+function assignKey(target, key, value) {
+  if (
+    key === '__proto__' &&
+    typeof Object !== 'undefined' &&
+    Object !== null &&
+    typeof Object.defineProperty === 'function'
+  ) {
+    Object.defineProperty(target, key, {
+      value: value,
+      writable: true,
+      enumerable: true,
+      configurable: true,
+    })
+    return
+  }
+  target[key] = value
+}
+
+/**
+ * 跳过 JSON 值，返回其结束后的下标。
+ *
+ * 用于在 WXS 中解析 JSON 文本（见 getOwnKeys 的说明）。
+ * 需正确跳过字符串（含转义）、对象、数组与标量。
+ */
+function skipJsonValue(json, i) {
+  var len = json.length
+  while (i < len && (json[i] === ' ' || json[i] === '\t' || json[i] === '\n' || json[i] === '\r')) i = i + 1
+  if (i >= len) return i
+  var ch = json[i]
+  if (ch === '"') {
+    i = i + 1
+    while (i < len) {
+      if (json[i] === '\\') { i = i + 2; continue }
+      if (json[i] === '"') return i + 1
+      i = i + 1
+    }
+    return i
+  }
+  if (ch === '{' || ch === '[') {
+    var depth = 0
+    while (i < len) {
+      var c = json[i]
+      if (c === '"') {
+        i = i + 1
+        while (i < len) {
+          if (json[i] === '\\') { i = i + 2; continue }
+          if (json[i] === '"') break
+          i = i + 1
+        }
+        i = i + 1
+        continue
+      }
+      if (c === '{' || c === '[') depth = depth + 1
+      else if (c === '}' || c === ']') {
+        depth = depth - 1
+        if (depth === 0) return i + 1
+      }
+      i = i + 1
+    }
+    return i
+  }
+  // 标量：读到逗号或右括号
+  while (i < len && json[i] !== ',' && json[i] !== '}' && json[i] !== ']') i = i + 1
+  return i
+}
+
+/**
+ * 枚举对象的可枚举键。
+ *
+ * 官方《WXS 语法参考》中，object 只有 constructor 属性与 toString 方法；
+ * 实测确认 WXS **既没有 Object.keys，也不支持 for...in**
+ * （for...in 会报 "Unexpected token"）。
+ * 因此只能在 WXS 内自行解析。JSON.stringify 是官方《基础类库》提供的，
+ * 这里用它取得形如 {"a":1,"b":2} 的文本，再按下标扫描取出顶层键。
+ *
+ * 旧实现直接调用 Object.keys，在 WXS 中抛错，导致依赖它的
+ * objectEntries / objectAssign / styleToString 静默产出空值。
+ */
+function getOwnKeys(obj) {
+  var result = []
+  if (obj === null || obj === undefined || typeof obj !== 'object') return result
+  var json = JSON.stringify(obj)
+  if (typeof json !== 'string' || json.length < 2 || json.charAt(0) !== '{') return result
+  var i = 1
+  var len = json.length
+  while (i < len) {
+    var ch = json[i]
+    if (ch === '}') break
+    if (ch !== '"') { i = i + 1; continue }
+    var start = i
+    i = i + 1
+    while (i < len && json[i] !== '"') {
+      if (json[i] === '\\') i = i + 1
+      i = i + 1
+    }
+    // slice 出来的是**带转义**的原始片段（含引号），必须还原后再作为键使用：
+    // 键里可能含 \" \\ \n 等转义，直接用原文本会得到错误的键名。
+    // 用平台自带的 JSON.parse 还原（官方《基础类库》提供 JSON.parse）。
+    // 注意：WXS **不支持 try/catch**，因此不能捕获解析失败——
+    // 但此处的 rawKey 必然是合法 JSON 字符串（由 JSON.stringify 产出），
+    // 解析不会失败，无需兜底。
+    var rawKey = json.slice(start, i + 1)
+    var key = JSON.parse(rawKey)
+    result.push(key)
+    i = i + 1
+    // 跳过冒号
+    while (i < len && json[i] !== ':') i = i + 1
+    i = i + 1
+    i = skipJsonValue(json, i)
+  }
+  return result
+}
+
 // 提供 WXS 中可用的数组方法
 module.exports = {
   /**
@@ -61,7 +200,7 @@ module.exports = {
     if (!style) return ''
     if (typeof style === 'string') return style
     var result = []
-    var keys = Object.keys(style)
+    var keys = getOwnKeys(style)
     for (var i = 0; i < keys.length; i++) {
       var key = keys[i]
       var val = style[key]
@@ -223,18 +362,24 @@ module.exports = {
 
   padStart: function(str, targetLength, padString) {
     if (typeof str !== 'string') return ''
-    var pad = (padString === undefined || padString === null) ? ' ' : String(padString)
+    var pad = (padString === undefined || padString === null) ? ' ' : toWxsString(padString)
     if (pad === '' || str.length >= targetLength) return str
-    var result = str
-    while (result.length < targetLength) {
-      result = pad + result
+    var padLength = targetLength - str.length
+    var filler = ''
+    while (filler.length < padLength) {
+      filler = filler + pad
     }
-    return result.slice(result.length - targetLength)
+    // 取重复后填充串的**左侧** padLength 个字符：
+    // 原生 String.prototype.padStart 在填充串需被截断时保留其前缀
+    // （'a'.padStart(5, 'abc') === 'abcaa'）。
+    // 旧实现用 result.slice(result.length - targetLength) 取尾部，
+    // 会得到 'cabca'，与原生语义不符。
+    return filler.slice(0, padLength) + str
   },
 
   padEnd: function(str, targetLength, padString) {
     if (typeof str !== 'string') return ''
-    var pad = (padString === undefined || padString === null) ? ' ' : String(padString)
+    var pad = (padString === undefined || padString === null) ? ' ' : toWxsString(padString)
     if (pad === '' || str.length >= targetLength) return str
     var result = str
     while (result.length < targetLength) {
@@ -272,11 +417,52 @@ module.exports = {
     return str.split(searchValue).join(replaceValue)
   },
 
+  /**
+   * 判断字符串是否以指定子串开头。
+   * 官方 WXS 的 string 方法仅到 ES5（charAt/indexOf/slice/...），
+   * startsWith 属于 ES6，WXS 中不存在，需在此补齐。
+   * 支持可选的 position（搜索起点），语义同 ES6 String.prototype.startsWith。
+   */
+  startsWith: function(str, searchString, position) {
+    if (typeof str !== 'string') return false
+    var pos = position || 0
+    if (pos < 0) pos = 0
+    return str.slice(pos, pos + searchString.length) === searchString
+  },
+
+  /**
+   * 判断字符串是否以指定子串结尾（endPosition 可指定被搜索部分的结尾）。
+   * endsWith 同为 ES6 方法，WXS 中不存在。
+   */
+  endsWith: function(str, searchString, endPosition) {
+    if (typeof str !== 'string') return false
+    var end = endPosition === undefined ? str.length : Math.min(endPosition, str.length)
+    var start = end - searchString.length
+    if (start < 0) return false
+    return str.slice(start, end) === searchString
+  },
+
+  /**
+   * 将字符串重复 count 次。
+   * repeat 同为 ES6 方法，WXS 中不存在；使用数组 join 实现以避免大量字符串拼接。
+   */
+  repeat: function(str, count) {
+    if (typeof str !== 'string') return ''
+    var n = Math.floor(count)
+    if (n < 0) return ''
+    var result = ''
+    var i = 0
+    while (i < n) {
+      result = result + str
+      i = i + 1
+    }
+    return result
+  },
   // ─── Object static methods ───────────────────────────────────────────────────
 
   objectEntries: function(obj) {
     if (obj === null || obj === undefined) return []
-    var keys = Object.keys(obj)
+    var keys = getOwnKeys(obj)
     var result = []
     for (var i = 0; i < keys.length; i++) {
       result.push([keys[i], obj[keys[i]]])
@@ -288,7 +474,7 @@ module.exports = {
     if (!entries || !entries.length) return {}
     var result = {}
     for (var i = 0; i < entries.length; i++) {
-      result[entries[i][0]] = entries[i][1]
+      assignKey(result, entries[i][0], entries[i][1])
     }
     return result
   },
@@ -297,16 +483,111 @@ module.exports = {
     for (var s = 1; s < arguments.length; s++) {
       var source = arguments[s]
       if (source === null || source === undefined) continue
-      var keys = Object.keys(source)
+      var keys = getOwnKeys(source)
       for (var i = 0; i < keys.length; i++) {
-        target[keys[i]] = source[keys[i]]
+        assignKey(target, keys[i], source[keys[i]])
       }
     }
     return target
   },
 
+  // ─── Object static methods (补充) ────────────────────────────────────────────
+
+  /**
+   * Object.keys 的 polyfill。
+   *
+   * WXS 没有 Object 全局（实测 typeof Object === undefined），
+   * 因此模板里的 Object.keys(...) 会静默产出空值，需在此提供等价实现。
+   * 键的枚举复用 getOwnKeys（基于 JSON.stringify 解析）。
+   */
+  objectKeys: function(obj) {
+    return getOwnKeys(obj)
+  },
+
+  /** Object.values 的 polyfill（同 Object.keys，WXS 无 Object 全局）。 */
+  objectValues: function(obj) {
+    var keys = getOwnKeys(obj)
+    var result = []
+    for (var i = 0; i < keys.length; i++) {
+      result.push(obj[keys[i]])
+    }
+    return result
+  },
+
+  // ─── Array static methods ────────────────────────────────────────────────────
+
+  /**
+   * Array.isArray 的 polyfill。
+   *
+   * WXS 没有 Array 全局（实测 typeof Array === 'undefined'），
+   * 但有 arr.constructor（返回**字符串** 'Array'，见官方《WXS 语法参考 · 数据类型》）。
+   *
+   * 切记**不能**顺手写 `|| ctor === Array`：
+   * WXS 中 Array 未定义，对非数组对象求值到 `ctor === Array` 会抛错
+   * （实测 {x:1} 返回空值），而这恰恰是 isArray 最需要判断的情况。
+   * 本函数因此只比较字符串。
+   */
+  arrayIsArray: function(value) {
+    return !!value && typeof value === 'object' && value.constructor === 'Array'
+  },
+
   // ─── Number static methods ───────────────────────────────────────────────────
 
+  /**
+   * Number.parseInt / Number.parseFloat 的 polyfill。
+   *
+   * WXS 的 Number 只有 isNaN/isFinite/isInteger 等少数静态方法，
+   * 没有 parseInt/parseFloat；但**全局** parseInt/parseFloat 是官方
+   * 《基础类库》提供的，直接转发即可。
+   */
+  numberParseInt: function(value, radix) {
+    return parseInt(value, radix)
+  },
+
+  numberParseFloat: function(value) {
+    return parseFloat(value)
+  },
+
+  // ─── Math 补充方法 ───────────────────────────────────────────────────────────
+
+  /** 官方 WXS 的 Math 只到 ES5，trunc/sign/log2/log10/cbrt/hypot 需自行实现。 */
+  mathTrunc: function(value) {
+    var n = value - 0
+    if (isNaN(n)) return NaN
+    return n < 0 ? Math.ceil(n) : Math.floor(n)
+  },
+
+  mathSign: function(value) {
+    var n = value - 0
+    if (isNaN(n) || n === 0) return n
+    return n > 0 ? 1 : -1
+  },
+
+  mathLog2: function(value) {
+    return Math.log(value) / Math.LN2
+  },
+
+  mathLog10: function(value) {
+    return Math.log(value) / Math.LN10
+  },
+
+  mathCbrt: function(value) {
+    var n = value - 0
+    if (isNaN(n)) return NaN
+    if (n === 0) return n
+    return n > 0 ? Math.pow(n, 1 / 3) : -Math.pow(-n, 1 / 3)
+  },
+
+  mathHypot: function() {
+    var sum = 0
+    for (var i = 0; i < arguments.length; i++) {
+      var v = arguments[i] - 0
+      if (isNaN(v)) return NaN
+      if (v === Infinity || v === -Infinity) return Infinity
+      sum += v * v
+    }
+    return Math.sqrt(sum)
+  },
   numberIsNaN: function(value) {
     return value !== value
   },

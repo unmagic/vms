@@ -29,14 +29,36 @@ export const WXS_POLYFILL_REGISTRY: Record<string, PolyfillEntry> = {
   trimStart: { type: 'instance' },
   trimEnd: { type: 'instance' },
   replaceAll: { type: 'instance' },
+  // startsWith / endsWith / repeat 同为 ES6 字符串方法，
+  // 官方 WXS 的 string 方法只到 ES5（charAt/indexOf/slice/...）；
+  // 不在此登记就会被原样输出到 WXS，运行时静默失效（详见 wxsUtils.wxs）。
+  startsWith: { type: 'instance' },
+  endsWith: { type: 'instance' },
+  repeat: { type: 'instance' },
   // ── Object 静态方法 ───────────────────────────
   entries: { type: 'static', object: 'Object' },
   fromEntries: { type: 'static', object: 'Object' },
   assign: { type: 'static', object: 'Object' },
+  // WXS 没有 Object 全局，keys/values 均需 polyfill（否则模板中静默为空）
+  keys: { type: 'static', object: 'Object' },
+  values: { type: 'static', object: 'Object' },
+  // ── Array 静态方法 ────────────────────────────
+  // WXS 没有 Array 全局；isArray 用 constructor === 'Array' 判断
+  isArray: { type: 'static', object: 'Array' },
   // ── Number 静态方法 ───────────────────────────
   isNaN: { type: 'static', object: 'Number' },
   isFinite: { type: 'static', object: 'Number' },
   isInteger: { type: 'static', object: 'Number' },
+  // 全局 parseInt/parseFloat 在 WXS 中存在，转发即可
+  parseInt: { type: 'static', object: 'Number' },
+  parseFloat: { type: 'static', object: 'Number' },
+  // ── Math 补充方法（官方只到 ES5）───────────────
+  trunc: { type: 'static', object: 'Math' },
+  sign: { type: 'static', object: 'Math' },
+  log2: { type: 'static', object: 'Math' },
+  log10: { type: 'static', object: 'Math' },
+  cbrt: { type: 'static', object: 'Math' },
+  hypot: { type: 'static', object: 'Math' },
 }
 
 const WXS_UTILS_NAMESPACE = '__vmsWXSUtils'

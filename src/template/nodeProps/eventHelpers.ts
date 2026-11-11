@@ -2,7 +2,8 @@ import t from '@babel/types'
 import type { VForInfo } from '@/types/node'
 import type { ScriptScope } from '@/types/scope'
 import { getVForItemName, getVForIndexName, getVForSourceExpression } from '@/utils/tools'
-import { isImportVariable } from '@/script/scopeAnalyzer'
+import { isImportVariable, isMacroVariable } from '@/script/scopeAnalyzer'
+import { GLOBAL_WHITELIST } from '@/utils/globalWhitelist'
 import { buildDestructuredAccess, resolveDestructuredVar } from '../tools'
 
 export const EVENT_PARAM_NAME = '__vms_event'
@@ -167,7 +168,19 @@ export function buildProxyRefsArgument(
   localVarNames?: Set<string>,
   scriptScope?: ScriptScope,
 ): t.Expression | t.SpreadElement {
-  if (t.isSpreadElement(arg)) return arg
+  if (t.isSpreadElement(arg)) {
+    // 展开元素内的变量同样需要改写（如 onTap(...list) 中的 list）
+    return t.spreadElement(
+      buildProxyRefsArgument(
+        arg.argument,
+        vForInfoList,
+        vForItemNames,
+        arrowFunctionArgumentNames,
+        localVarNames,
+        scriptScope,
+      ) as t.Expression,
+    )
+  }
 
   if (t.isIdentifier(arg)) {
     if (arg.name === '$event' || arg.name === EVENT_PARAM_NAME) {
@@ -215,6 +228,13 @@ export function buildProxyRefsArgument(
       return arg
     }
 
+    // 全局变量（wx / Date / Math / 等）在桥接函数中可直接访问，
+    // 不能包装成 __vmsProxyRefs.xxx——它们从未注册进组件 data，
+    // 包装后会静默变成 undefined（如 __vmsProxyRefs.Date.now() 抛错）。
+    if (GLOBAL_WHITELIST.has(arg.name)) {
+      return arg
+    }
+
     return t.memberExpression(t.identifier('__vmsProxyRefs'), t.identifier(arg.name))
   }
 
@@ -228,9 +248,22 @@ export function buildProxyRefsArgument(
       localVarNames,
       scriptScope,
     )
+    // 计算成员（obj[expr]）的 property 是表达式，其中也可能引用需改写的变量
+    // （如 map[key] 的 key → __vmsProxyRefs.key）；非计算成员的 property 是
+    // 属性名，必须原样保留。
+    const property = arg.computed
+      ? (buildProxyRefsArgument(
+          arg.property as t.Expression,
+          vForInfoList,
+          vForItemNames,
+          arrowFunctionArgumentNames,
+          localVarNames,
+          scriptScope,
+        ) as t.Expression)
+      : arg.property
     return t.optionalMemberExpression(
       processedObject as t.Expression,
-      arg.property,
+      property,
       arg.computed,
       arg.optional,
     )
@@ -247,7 +280,17 @@ export function buildProxyRefsArgument(
       localVarNames,
       scriptScope,
     )
-    return t.memberExpression(processedObject as t.Expression, arg.property, arg.computed)
+    const property = arg.computed
+      ? (buildProxyRefsArgument(
+          arg.property as t.Expression,
+          vForInfoList,
+          vForItemNames,
+          arrowFunctionArgumentNames,
+          localVarNames,
+          scriptScope,
+        ) as t.Expression)
+      : arg.property
+    return t.memberExpression(processedObject as t.Expression, property, arg.computed)
   }
 
   if (t.isObjectExpression(arg)) {
@@ -259,6 +302,7 @@ export function buildProxyRefsArgument(
           vForItemNames,
           arrowFunctionArgumentNames,
           localVarNames,
+          scriptScope,
         )
         return t.objectProperty(prop.key, processedValue as t.Expression, prop.computed)
       }
@@ -362,7 +406,120 @@ export function buildProxyRefsArgument(
     )
   }
 
+  // 处理调用表达式参数 (如: onTap(other(x)) 中的 x)
+  if (t.isCallExpression(arg)) {
+    return t.callExpression(
+      buildProxyRefsArgument(
+        arg.callee as t.Expression,
+        vForInfoList,
+        vForItemNames,
+        arrowFunctionArgumentNames,
+        localVarNames,
+        scriptScope,
+      ) as t.Expression,
+      arg.arguments.map(
+        (a) =>
+          buildProxyRefsArgument(
+            a,
+            vForInfoList,
+            vForItemNames,
+            arrowFunctionArgumentNames,
+            localVarNames,
+            scriptScope,
+          ) as t.Expression,
+      ),
+    )
+  }
+
+  // 处理 await 表达式 (如: onTap(await x))
+  if (t.isAwaitExpression(arg)) {
+    return t.awaitExpression(
+      buildProxyRefsArgument(
+        arg.argument,
+        vForInfoList,
+        vForItemNames,
+        arrowFunctionArgumentNames,
+        localVarNames,
+        scriptScope,
+      ) as t.Expression,
+    )
+  }
+
+  // 处理一元表达式 (如: onTap(!flag))
+  if (t.isUnaryExpression(arg)) {
+    return t.unaryExpression(
+      arg.operator,
+      buildProxyRefsArgument(
+        arg.argument,
+        vForInfoList,
+        vForItemNames,
+        arrowFunctionArgumentNames,
+        localVarNames,
+        scriptScope,
+      ) as t.Expression,
+      arg.prefix,
+    )
+  }
+
+  // 处理模板字符串 (如: onTap(`hello ${name}`))
+  if (t.isTemplateLiteral(arg)) {
+    return t.templateLiteral(
+      arg.quasis,
+      arg.expressions.map(
+        (e) =>
+          buildProxyRefsArgument(
+            e as t.Expression,
+            vForInfoList,
+            vForItemNames,
+            arrowFunctionArgumentNames,
+            localVarNames,
+            scriptScope,
+          ) as t.Expression,
+      ),
+    )
+  }
+
   return arg as t.Expression
+}
+
+/**
+ * 将成员调用 callee 的根对象改写为运行时可访问的形式。
+ * setup 内声明的变量在桥接函数（data 注入后运行）中已脱离闭包，
+ * 必须经 __vmsProxyRefs 解包访问；props、import、macro、全局变量直接可用。
+ * 仅处理根为 Identifier 的成员表达式，嵌套形式（a.b.c）由外层逻辑保证。
+ */
+export function rewriteCalleeObject(
+  callee: t.Expression,
+  scriptScope?: ScriptScope,
+  localVarNames?: Set<string>,
+): t.Expression {
+  if (t.isMemberExpression(callee) && t.isIdentifier(callee.object)) {
+    const name = callee.object.name
+    if (
+      // v-for 的 item / index 在桥接函数内已声明为局部变量（含 index 参数
+      // 直接来自 dataset 解构），不能再包装成 __vmsProxyRefs.xxx——
+      // 它们从未注册进组件 data，包装后取到 undefined。
+      !(localVarNames && localVarNames.has(name)) &&
+      !GLOBAL_WHITELIST.has(name) &&
+      !(scriptScope && isImportVariable(name, scriptScope)) &&
+      !(scriptScope && isMacroVariable(name, scriptScope)) &&
+      !(scriptScope && name === scriptScope.propsVarName) &&
+      !(scriptScope && name === scriptScope.propsRestName)
+    ) {
+      // 计算成员（a[b]()）的 property 是表达式，其中的变量同样需要经
+      // __vmsProxyRefs 解包（如 b → __vmsProxyRefs.b）；非计算成员的
+      // property 是属性名，必须原样保留。
+      const property = callee.computed
+        ? t.memberExpression(t.identifier('__vmsProxyRefs'), callee.property)
+        : callee.property
+      return t.memberExpression(
+        t.memberExpression(t.identifier('__vmsProxyRefs'), t.identifier(name)),
+        property,
+        callee.computed,
+      )
+    }
+  }
+  return callee
 }
 
 // ==================== v-for item 声明辅助函数 ====================
@@ -372,7 +529,7 @@ export function buildProxyRefsArgument(
  * 从种子 item 出发，递归检查每个 item 的 source 是否依赖其他 v-for item，
  * 将所有依赖项也加入集合（确保声明顺序正确）
  */
-function resolveItemsToDeclare(
+export function resolveItemsToDeclare(
   seedItems: Set<string> | string[],
   vForInfoList: VForInfo[],
 ): Set<string> {
@@ -404,7 +561,7 @@ function resolveItemsToDeclare(
  * 按 v-for 嵌套顺序将需要的 item 声明推入 statements
  * 外层先声明，确保内层可以引用外层 item
  */
-function declareVForItems(
+export function declareVForItems(
   itemsToDeclare: Set<string>,
   vForInfoList: VForInfo[],
   statements: t.Statement[],
@@ -424,7 +581,7 @@ function declareVForItems(
 /**
  * 从 dataset 解构 v-for 索引并推入 statements
  */
-function declareDatasetIndices(
+export function declareDatasetIndices(
   dataKey: string,
   vForInfoList: VForInfo[],
   statements: t.Statement[],
@@ -494,7 +651,7 @@ export function getASTWithVForItemFromProxyRefs(
     ) as t.Expression[]
   }
 
-  // return card.onClick(...)
+  // return card.onClick(...)（item 已声明为局部常量，即解包后的值，无需再改写）
   statements.push(
     t.returnStatement(
       t.callExpression(
@@ -560,6 +717,17 @@ export function getASTWithoutVForItemFromProxyRefs(
   // 创建局部变量名集合，用于避免重复展开
   const localVarNames = new Set(usedVForItems)
 
+  // callee 的根对象若为 v-for 的 item / index 或已声明的局部变量，
+  // 在桥接函数内可直接访问，不能再包装成 __vmsProxyRefs.xxx。
+  const calleeLocalNames = new Set(localVarNames)
+  if (vForInfoList) {
+    for (const info of vForInfoList) {
+      const itemName = getVForItemName(info)
+      if (itemName) calleeLocalNames.add(itemName)
+      calleeLocalNames.add(getVForIndexName(info) || 'index')
+    }
+  }
+
   let callArgs: t.Expression[]
   if (!argumentsAst || argumentsAst.length === 0) {
     callArgs = [t.identifier(EVENT_PARAM_NAME)]
@@ -576,7 +744,11 @@ export function getASTWithoutVForItemFromProxyRefs(
     ) as t.Expression[]
   }
 
-  statements.push(t.returnStatement(t.callExpression(calleeAst, callArgs)))
+  statements.push(
+    t.returnStatement(
+      t.callExpression(rewriteCalleeObject(calleeAst, scriptScope, calleeLocalNames), callArgs),
+    ),
+  )
   return t.blockStatement(statements)
 }
 

@@ -206,13 +206,40 @@ import MyCard from './MyCard.vue'
     })
   })
 
-  describe('4. 作用域插槽（不支持场景）', () => {
-    it('4.1 作用域插槽应报编译错误', async () => {
+  describe('4. 作用域插槽', () => {
+    it('4.1 作用域插槽使用方（父组件）生成 slot: 接收属性', async () => {
+      const vueContent = `
+<template>
+  <MyList :items="items">
+    <template #item="{ item, index }">
+      <text>{{ item.name }} - {{ index }}</text>
+    </template>
+  </MyList>
+</template>
+<script setup lang="ts">
+import { ref } from '@unmagic/vue-mini'
+import MyList from './MyList.vue'
+const items = ref([{ name: 'a' }])
+</script>
+`
+      const { wxml, js, error } = await compileVueContent(vueContent)
+
+      expect(error).toBeNull()
+      // glass-easel 动态 slot 语法：slot:item slot:index
+      expect(wxml).toContain('slot:item')
+      expect(wxml).toContain('slot:index')
+      expect(wxml).toContain('{{item.name}}')
+      // 作用域插槽接收变量不应被收集为父组件 data
+      expect(js).not.toContain('item,')
+      expect(js).not.toContain('index,')
+    })
+
+    it('4.2 作用域插槽别名', async () => {
       const vueContent = `
 <template>
   <MyList>
-    <template v-slot:item="{ item }">
-      <text>{{ item.name }}</text>
+    <template #item="{ item: it }">
+      <text>{{ it }}</text>
     </template>
   </MyList>
 </template>
@@ -220,11 +247,53 @@ import MyCard from './MyCard.vue'
 import MyList from './MyList.vue'
 </script>
 `
-      const { error } = await compileVueContent(vueContent)
+      const { wxml, error } = await compileVueContent(vueContent)
 
-      // 作用域插槽（有 exp 的 v-slot）应该报错
-      expect(error).not.toBeNull()
-      expect(error?.message).toContain('作用域插槽')
+      expect(error).toBeNull()
+      expect(wxml).toContain('slot:item="it"')
+      expect(wxml).toContain('{{it}}')
+    })
+
+    it('4.3 作用域插槽出口（子组件）开启 dynamicSlots', async () => {
+      const vueContent = `
+<template>
+  <view v-for="(item, index) in items" :key="item.id">
+    <slot name="item" :item="item" :index="index" />
+  </view>
+</template>
+<script setup lang="ts">
+import { ref } from '@unmagic/vue-mini'
+const items = ref([{ id: 1, name: 'a' }])
+</script>
+`
+      const { wxml, js, error } = await compileVueContent(vueContent)
+
+      expect(error).toBeNull()
+      // slot 上的作用域数据转为属性
+      expect(wxml).toContain('item="{{item}}"')
+      expect(wxml).toContain('index="{{index}}"')
+      // 开启 dynamicSlots
+      expect(js).toContain('dynamicSlots')
+    })
+
+    it('4.4 默认作用域插槽（v-slot="{ item }"）', async () => {
+      const vueContent = `
+<template>
+  <MyList>
+    <template v-slot="{ item }">
+      <text>{{ item }}</text>
+    </template>
+  </MyList>
+</template>
+<script setup lang="ts">
+import MyList from './MyList.vue'
+</script>
+`
+      const { wxml, error } = await compileVueContent(vueContent)
+
+      expect(error).toBeNull()
+      expect(wxml).toContain('slot:item')
+      expect(wxml).not.toContain('slot="default"')
     })
   })
 

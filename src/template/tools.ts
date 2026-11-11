@@ -1,7 +1,7 @@
 import { getComponentMatcher, VMS_FIXED_TAG_PREFIX } from '@/utils/constants'
 import * as t from '@babel/types'
 import { getExpressionTSAst, getIdentifiersWithoutVForVariables } from '@/utils/ast'
-import { parseDestructuredVars } from '@/utils/tools'
+import { assertUniqueVForIndexNames, parseDestructuredVars } from '@/utils/tools'
 import type {
   VForInfo,
   VMSCodegenNode,
@@ -39,6 +39,8 @@ export function createVMSTransformContext(scriptScope?: ScriptScope): VMSTransfo
     needsProxyRefs: false,
     scriptScope,
     rootElementNode: null,
+    hasDynamicSlots: false,
+    scopedSlotVars: new Set(),
   }
 }
 
@@ -173,6 +175,11 @@ export function addRenderProperty(
   key: string,
   ctx: VMSTransformContext,
 ): void {
+  // 作用域插槽的接收变量（slot 数据）不属于组件 data，跳过
+  if (ctx.scopedSlotVars.has(key)) {
+    return
+  }
+
   // 如果传入了 scriptScope，检查变量应该如何被收集
   const collectType = shouldCollectVariable(key, ctx.scriptScope)
 
@@ -407,10 +414,23 @@ export function isComplexExpression(ast: t.Node): boolean {
     case 'UnaryExpression':
       // typeof 运算符需要走 WXS 函数生成路径
       if (ast.operator === 'typeof') return true
+      // 一元 + 必须走 WXS：WXML 的表达式解析器**不支持**一元加号，
+      // 产物里出现 {{+str}} 会让微信编译器报
+      // "Bad value with message: unexpected token '+'"，**整个页面无法加载**。
+      // 已实测：!、-、~、!! 在 WXML 中可用，唯独一元 + 不行。
+      // WXS 中一元 + 是合法的（+str → 7），因此改由 WXS 求值即可。
+      if (ast.operator === '+') return true
       return isComplexExpression(ast.argument)
 
     // 二元表达式：递归检查左右操作数
     case 'BinaryExpression':
+      // WXML 的表达式解析器不支持以下两个运算符，原样输出会让微信编译器报
+      // "Bad value with message: unexpected token '...'"，**整个页面无法加载**：
+      //   **  → 幂运算（unexpected token '*'）
+      //   >>> → 无符号右移（unexpected token '>'）
+      // 已实测：+ - * / % << >> & | ^ 等其余运算符在 WXML 中均可用，
+      // 且这两个运算符在 WXS 中合法，因此只需改由 WXS 求值。
+      if (ast.operator === '**' || ast.operator === '>>>') return true
       return isComplexExpression(ast.left) || isComplexExpression(ast.right)
 
     // 成员表达式递归检查对象和属性
@@ -579,6 +599,13 @@ export function assignVForInfoListMinimal(
         vForInfo.destructuredVars = destructuredVars
       }
       const newVForInfoList = parentVForInfoList ? [...parentVForInfoList, vForInfo] : [vForInfo]
+
+      // 嵌套 v-for 各级 index 重名时无法正确转译（内层遮蔽外层，且会生成
+      // 非法的重复解构声明）。此处已持有完整祖先链，尽早报错并给出修复建议。
+      if (newVForInfoList.length > 1) {
+        assertUniqueVForIndexNames(newVForInfoList)
+      }
+
       setVForInfoList(ctx, node, newVForInfoList)
 
       const children = (node as ElementNode | RootNode).children

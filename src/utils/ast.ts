@@ -193,6 +193,21 @@ export function collectVariablesFromAST(
         })
       }
       break
+    case 'ArrayExpression':
+      // 数组字面量：逐元素收集变量。
+      // 此前缺此分支，导致 [objVar, 'x'] 这类表达式的变量被漏掉——
+      // 生成的 WXS 函数不会把 objVar 作为形参，函数体却引用它，
+      // 运行时报错 / 静默为空（:style="[objVar]" / :class 等场景）。
+      if (node.elements) {
+        node.elements.forEach((element: any) => {
+          if (element && element.type !== 'SpreadElement') {
+            collectVariablesFromAST(element, variables, excludedVars)
+          } else if (element && element.type === 'SpreadElement') {
+            collectVariablesFromAST(element.argument, variables, excludedVars)
+          }
+        })
+      }
+      break
     case 'TemplateLiteral':
       // 处理模板字符串，收集其中表达式的变量
       if (node.expressions) {

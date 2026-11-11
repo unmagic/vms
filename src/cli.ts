@@ -3,6 +3,17 @@ import { transformVueToMiniProgram } from '@/transformer'
 import type { InputOptions } from '@/types/build'
 import { OUTPUT_DIR, userConfig } from '@/utils/constants'
 import { copyPolyfillFiles, copyProjectConfigFile } from '@/utils/tools'
+import { batchProcess } from '@/utils/concurrency'
+import {
+  collectIndependentPackages,
+  collectPagePaths,
+  loadAppJson,
+  normalizePagePath,
+} from '@/utils/appJson'
+import { createOutputPathMapper } from '@/utils/outputPath'
+import { findOwningIndependentPackage } from '@/utils/packagePath'
+import { createModuleDedupRegistry } from '@/utils/moduleDedup'
+import { collectFilesByExtension } from '@/utils/collectFiles'
 import { handleCompileError, getErrorMessage } from '@/utils/errorHandler'
 import { BabelFileResult, transformAsync, transformFileAsync } from '@babel/core'
 import { traverse } from '@/utils/babelTraverse'
@@ -21,20 +32,6 @@ import { performance } from 'perf_hooks'
 
 const NODE_ENV = process.env.NODE_ENV || 'production'
 
-interface Subpackage {
-  independent?: boolean
-  root: string
-}
-
-interface AppJson {
-  pages?: string[]
-  subPackages?: Array<{
-    root: string
-    pages: string[]
-  }>
-  subpackages?: Subpackage[]
-}
-
 // 存储页面路径列表，用于判断组件是否为页面组件
 let pagePaths: Set<string> | null = null
 // 缓存文件路径到是否为页面组件的映射
@@ -46,7 +43,7 @@ const pageComponentCache = new Map<string, boolean>()
 function clearAllCaches() {
   pagePaths = null
   pageComponentCache.clear()
-  pathCache.clear()
+  outputPathMapper.clear()
 }
 
 /**
@@ -56,36 +53,15 @@ function clearAllCaches() {
 async function loadPagePaths(): Promise<Set<string>> {
   if (pagePaths) return pagePaths
 
-  const appJsonPath = path.join(sourceDir, 'app.json')
-  pagePaths = new Set<string>()
-
-  try {
-    const appJson: AppJson = await fs.readJson(appJsonPath)
-
-    // 处理主包 pages
-    if (appJson.pages) {
-      for (const page of appJson.pages) {
-        // page 格式: pages/index/Index
-        pagePaths.add(page)
-      }
-    }
-
-    // 处理分包 subPackages
-    if (appJson.subPackages) {
-      for (const pkg of appJson.subPackages) {
-        const root = pkg.root
-        for (const page of pkg.pages) {
-          // 分包页面格式: subHome/pages/home/HomeIndex
-          pagePaths.add(`${root}/${page}`)
-        }
-      }
-    }
-
-    console.log(bold(green(`加载到 ${pagePaths.size} 个页面路径`)))
-  } catch (error: unknown) {
-    console.warn('读取 app.json 失败:', getErrorMessage(error))
+  const appJson = await loadAppJson(sourceDir)
+  if (!appJson) {
+    console.warn('读取 app.json 失败:', path.join(sourceDir, 'app.json'))
+    pagePaths = new Set<string>()
+    return pagePaths
   }
 
+  pagePaths = collectPagePaths(appJson)
+  console.log(bold(green(`加载到 ${pagePaths.size} 个页面路径`)))
   return pagePaths
 }
 
@@ -104,8 +80,7 @@ function isPageComponent(filePath: string): boolean {
     return false
   }
 
-  // 移除 sourceDir 前缀和 .vue 后缀
-  const normalizedPath = path.relative(sourceDir, filePath).replace(/\.vue$/, '')
+  const normalizedPath = normalizePagePath(sourceDir, filePath)
 
   const isPage = pagePaths.has(normalizedPath)
   pageComponentCache.set(filePath, isPage)
@@ -176,98 +151,25 @@ const IGNORED_FILES = (file: string, stats?: fs.Stats) => {
 // 并行处理配置：I/O 密集型任务可以使用更高并发
 const CONCURRENT_LIMIT = Math.max(4, os.cpus().length * 2 - 1)
 
-// 真正的并发池实现（而非批处理）
-async function batchProcess<T>(
-  items: T[],
-  processor: (item: T) => Promise<void>,
-  concurrency: number = CONCURRENT_LIMIT,
-): Promise<void> {
-  if (items.length === 0) return
-
-  let index = 0
-  let running = 0
-  let completed = 0
-  const total = items.length
-  let hasError = false
-
-  return new Promise((resolve, reject) => {
-    const runNext = async () => {
-      // 启动新的任务，直到达到并发上限或所有任务都已启动
-      while (index < total && running < concurrency && !hasError) {
-        const currentIndex = index++
-        running++
-
-        processor(items[currentIndex])
-          .catch((error) => {
-            console.error(`处理失败 [${items[currentIndex]}]:`, error)
-            hasError = true // ✅ 标记错误，阻止新任务启动
-          })
-          .finally(() => {
-            running--
-            completed++
-
-            if (completed === total) {
-              if (hasError) {
-                reject(new Error('部分任务处理失败'))
-              } else {
-                resolve()
-              }
-            } else if (!hasError) {
-              // 继续启动下一个任务
-              runNext()
-            }
-            // 如果有错误，不再启动新任务，等待已启动的任务完成
-          })
-      }
-    }
-
-    runNext()
-  })
-}
-
-// 路径转换缓存 - 避免重复计算
-const pathCache = new Map<string, string>()
-function getOutputPath(inputPath: string): string {
-  let cached = pathCache.get(inputPath)
-  if (!cached) {
-    // ✅ 安全的字符串替换（只替换前缀，避免 sourceDir 含正则特殊字符导致替换失败）
-    cached = inputPath.startsWith(sourceDir)
-      ? OUTPUT_DIR + inputPath.slice(sourceDir.length)
-      : inputPath
-    pathCache.set(inputPath, cached)
-  }
-  return cached
-}
-
-// 清空路径缓存（在构建完成后调用）
-function clearPathCache() {
-  pathCache.clear()
-}
+// 路径转换缓存 - 避免重复计算（实现见 utils/outputPath.ts）
+const outputPathMapper = createOutputPathMapper(sourceDir, OUTPUT_DIR)
+const getOutputPath = outputPathMapper.toOutput
+const clearPathCache = outputPathMapper.clear
 
 async function findIndependentPackages() {
-  const appJson: AppJson = await fs.readJson(path.resolve(sourceDir, 'app.json'))
-  if (appJson.subpackages) {
-    independentPackages = appJson.subpackages
-      .filter(({ independent }) => independent)
-      .map(({ root }) => root)
-  }
+  const appJson = await loadAppJson(sourceDir)
+  if (!appJson) return
+  // 必须同时兼容 subPackages（官方驼峰写法）与 subpackages，
+  // 否则标准 app.json 中的独立分包会被静默漏掉（依赖不会复制到分包目录）。
+  independentPackages = collectIndependentPackages(appJson)
 }
 
 const builtLibraries: string[] = []
-const bundledModules = new Map<string, Set<string>>()
+// 去重登记：判断某个依赖是否已处理过（实现见 utils/moduleDedup.ts）
+const moduleDedup = createModuleDedupRegistry(() => builtLibraries)
 async function bundleModule(module: string, pkg: string) {
-  const bundled = bundledModules.get(pkg)
-  if (
-    bundled?.has(module) ||
-    // 精确到包名或子路径，避免已构建的 foo 误拦截 foo-bar
-    builtLibraries.some((library) => module === library || module.startsWith(library + '/'))
-  ) {
+  if (moduleDedup.shouldSkip(module, pkg)) {
     return false
-  }
-  if (bundled) {
-    bundled.add(module)
-  } else {
-    bundledModules.set(pkg, new Set([module]))
   }
   const pkInfo = await getPackageInfo(module)
   if (pkInfo) {
@@ -337,12 +239,7 @@ function traverseAST(ast: t.File, pkg: string, babelOnly = false) {
           if (!valid) return
           return Promise.all(
             independentPackages.map((item) => {
-              const bundled = bundledModules.get(item)
-              if (bundled) {
-                bundled.add(module)
-              } else {
-                bundledModules.set(item, new Set([module]))
-              }
+              moduleDedup.register(module, item)
               return fs.copy(
                 path.join(OUTPUT_DIR, 'miniprogram_npm', module),
                 path.join(OUTPUT_DIR, item, 'miniprogram_npm', module),
@@ -391,17 +288,7 @@ async function buildComponentLibrary(name: string) {
 
     // 递归获取所有 .js 文件并处理（替代 watcher，更简洁可靠）
     const processJsFiles = async (dir: string): Promise<void> => {
-      const entries = await fs.readdir(dir, { withFileTypes: true })
-      const jsFiles: string[] = []
-
-      for (const entry of entries) {
-        const fullPath = path.join(dir, entry.name)
-        if (entry.isDirectory()) {
-          await processJsFiles(fullPath)
-        } else if (entry.isFile() && entry.name.endsWith('.js')) {
-          jsFiles.push(fullPath)
-        }
-      }
+      const jsFiles = await collectFilesByExtension(dir, ['.js'])
 
       // 使用并发池处理所有 .js 文件（限制并发避免内存耗尽）
       const jsConcurrency = Math.min(10, CONCURRENT_LIMIT)
@@ -478,22 +365,12 @@ async function scanDependencies() {
   }
 }
 
-// 缓存独立包路径的 normalize 结果
-const normalizedPkgPaths = new Map<string, string>()
-
 async function dealScriptCode(filePath: string, result: BabelFileResult) {
   const ast = result.ast as t.File
   let code = result.code as string
 
-  // 使用缓存避免重复 path.normalize 计算
-  const pkg = independentPackages.find((item) => {
-    let normalized = normalizedPkgPaths.get(item)
-    if (!normalized) {
-      normalized = path.normalize(`${sourceDir}/${item}`)
-      normalizedPkgPaths.set(item, normalized)
-    }
-    return filePath.startsWith(normalized)
-  })
+  // 判断文件属于哪个独立分包（内部使用带分隔符校验的前缀匹配）
+  const pkg = findOwningIndependentPackage(filePath, sourceDir, independentPackages)
 
   // The `src/` prefix is added to to distinguish `src` and `src/src`.
   traverseAST(ast, pkg ? path.join(sourceDir, pkg) : sourceDir)
@@ -667,7 +544,7 @@ async function dev() {
       try {
         await Promise.all(filesToDelete.map((f) => fs.remove(f)))
         // 同步移除缓存
-        pathCache.delete(filePath)
+        outputPathMapper.invalidate(filePath)
         pageComponentCache.delete(filePath)
       } catch (error: unknown) {
         console.warn(`删除目标文件失败：${filesToDelete.join(', ')}`, getErrorMessage(error))
@@ -851,7 +728,6 @@ async function prod(options: InputOptions) {
           topLevelJobs = null
           bundleJobs = null
           clearPathCache()
-          normalizedPkgPaths.clear()
 
           if (options.upload) {
             const { default: ci } = await import('miniprogram-ci')

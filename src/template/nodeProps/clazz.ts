@@ -139,6 +139,25 @@ export function transformTemplateClass(
     classPropContent.push('class')
   }
 
+  // <template> 会被编译为 <block>（官方称"虚拟块"），它不产生真实节点，
+  // 因此 class / style 写在其上不会生效。已用模拟器实测确认：
+  // querySelectorAll('block') 返回空数组，而 'view' 能查到元素。
+  //
+  // 只对**用户手写**的 class/style 告警——自动注入的父组件 class/style
+  // （根节点为 <template> 时）用户无从"移走"，告警无指导意义。
+  // 真实项目未出现该写法，故只告警不阻断，避免误伤既有工程。
+  if (node.tag === 'template') {
+    const hasUserClass = props?.some(
+      (p: any) => p.rawName === ':class' || (p.type === NodeTypes.ATTRIBUTE && p.name === 'class'),
+    )
+    if (hasUserClass) {
+      console.warn(
+        '[vms] <template> 上的 class 不会生效：<template> 编译为 <block>（虚拟块），' +
+          '不产生真实节点。请把 class 移到内部的实际元素上。',
+      )
+    }
+  }
+
   // 如果有 class 内容，更新 codegenNode
   if (classPropContent.length > 0) {
     const existingCodegenProps = getCodegenNodeProps(node)

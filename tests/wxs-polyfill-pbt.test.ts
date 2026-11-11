@@ -141,6 +141,32 @@ describe('P5: objectFromEntries(objectEntries(obj)) round-trip', () => {
       { numRuns: 100 },
     )
   })
+
+  // 回归：fast-check 的 dictionary 会随机生成 "__proto__" 键。
+  // 直接 target["__proto__"] = value 会触发原型 setter 并静默丢键，
+  // 导致往返结果缺失该属性（且可能污染原型）。
+  it('preserves the "__proto__" key without polluting the prototype', () => {
+    const source = JSON.parse('{"__proto__": 7, "a": 1}') as Record<string, number>
+
+    const result = wxsUtils.objectFromEntries(wxsUtils.objectEntries(source))
+
+    expect(Object.prototype.hasOwnProperty.call(result, '__proto__')).toBe(true)
+    expect(result['__proto__']).toBe(7)
+    expect(result.a).toBe(1)
+    // 原型未被污染
+    expect(({} as Record<string, unknown>)['__proto__']).toBe(Object.prototype)
+    expect(({} as Record<string, unknown>).a).toBeUndefined()
+  })
+
+  it('objectAssign copies the "__proto__" key as an own property', () => {
+    const source = JSON.parse('{"__proto__": 3, "b": 2}') as Record<string, number>
+
+    const result = wxsUtils.objectAssign({}, source)
+
+    expect(Object.prototype.hasOwnProperty.call(result, '__proto__')).toBe(true)
+    expect(result['__proto__']).toBe(3)
+    expect(result.b).toBe(2)
+  })
 })
 
 // ─── P6: padStart/padEnd 长度保证 ─────────────────────────────────────────────

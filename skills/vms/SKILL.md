@@ -4,7 +4,7 @@ description: 使用 VMS (Vue Mini SFC) 工具开发微信小程序的完整指�
 license: MIT
 metadata:
   author: github.com/unmagic
-  version: '0.0.2'
+  version: '0.1.6'
 ---
 
 # Vue Mini SFC 微信小程序开发指南
@@ -13,14 +13,14 @@ metadata:
 
 **Vue Mini SFC**（简称 **VMS**）允许你使用 Vue 3 `<script setup lang="ts">` 语法开发微信小程序，自动编译为小程序原生代码。
 
-**版本：** 0.0.2 | **仓库：** github.com/unmagic/vms
+**版本：** 0.1.6 | **仓库：** github.com/unmagic/vms
 
 **要求：**
 
 - **必须使用 TypeScript** - SFC 文件必须以 `<script setup lang="ts">` 编写
 - Vue 3 Composition API + `<script setup>`
-- 运行时：`@unmagic/vue-mini >= 1.0.0`
-- Node.js >= 22.17.1
+- 运行时：`@unmagic/vue-mini >= 1.0.3`
+- Node.js >= 22
 
 **输出：** 微信小程序原生代码（WXML + JS + WXSS + JSON）
 
@@ -79,8 +79,11 @@ export default {
     prefix: 'td-',
     pathPrefix: 'tdesign-miniprogram/',
   },
-  cacheStats: false, // 缓存统计开关（默认 false）
   copyOnly: [], // 跳过 Babel 直接复制的文件（如 ['big.js', 'ec-canvas/']）
+
+  // 启用 glass-easel 组件框架（默认 false）
+  // 作用域插槽依赖该开关（dynamicSlots）；要求基础库 >= 3.8.12
+  glassEasel: false,
 }
 ```
 
@@ -244,6 +247,64 @@ const items = ref([{ name: 'Item 1', onClick: () => console.log('clicked') }])
 - 纯标识符（如 `index`）→ 保留原名
 - 嵌套路径（如 `item.data.id`）→ 回退到 `*this` 并发出警告
 
+#### 变量命名规则（嵌套 v-for）
+
+小程序中内层 `wx:for` 的 index 会遮蔽外层的同名 index。VMS 需要把各级索引
+通过 `data-*` 传回事件处理函数，因此**嵌套层级之间不能复用同一个 index 变量名**：
+
+```vue
+<!-- 正确：各级 index 使用不同名称 -->
+<view v-for="(row, rowIndex) in rows" :key="row.id">
+  <view v-for="(cell, cellIndex) in row.cells" :key="cell.id">
+    <input v-model="cell.text" />
+  </view>
+</view>
+
+<!-- 编译结果：data-a="{{[rowIndex,cellIndex]}}" -->
+<!-- 处理函数：const { a: [rowIndex, cellIndex] } = e.currentTarget.dataset -->
+
+<!-- 错误：两级都叫 index，编译期报错 -->
+<view v-for="(row, index) in rows">
+  <view v-for="(cell, index) in row.cells">...</view>
+</view>
+```
+
+- **只写一个 index** 时无需改名：未显式命名的层级会自动生成唯一名称
+  （如 `_child_0_index`），与外层不冲突
+- **并列（非嵌套）**的多个 v-for 可以都叫 index，互不影响
+
+> 编译后 WXML 使用 `data-a="{{[一级索引, 二级索引]}}"` 携带多级索引，
+> 事件处理函数按序解构后逐级解引用（如 `cell.text = e.detail.value`）。
+>
+> **取值位置随事件源不同**：原生表单标签取 `e.detail.value`；自定义组件
+> （含本组件自身的 `defineModel`）取 **`e.detail`**——子组件经
+> `triggerEvent(name, value)` 传值时，微信把第二个参数**整体**作为 detail。
+
+#### 解构式 v-for
+
+支持对象/数组解构，解构变量在编译期会被改写为 `item` 的属性访问，
+因此**可以安全地用于 `v-model`、事件参数与 `:class` 等场景**：
+
+```vue
+<view v-for="({ id, name }, index) in list" :key="id">
+  <input v-model="name" />
+</view>
+<!-- 编译结果：value="{{item.name}}"，setter 写回 item.name -->
+
+<view v-for="{ user: { name } } in list" :key="name">
+  <input v-model="name" />
+</view>
+<!-- 嵌套路径：value="{{item.user.name}}" -->
+
+<view v-for="([a, b], i) in pairs" :key="i">
+  <input v-model="b" />
+</view>
+<!-- 数组下标：value="{{item[1]}}" -->
+```
+
+> WXML 中不存在解构变量名，全部落到 `wx:for` 默认的 `item` 上。
+> 若外层解构变量被内层的同名 item 遮蔽，会编译报错，请为内层指定 `wx:for-item`。
+
 ### 4. 条件渲染
 
 ```vue
@@ -324,6 +385,114 @@ VMS 支持完整的 Vue `:style` 语法。
 
 **注意：** `camelCase` 属性名会自动转换为 `kebab-case`（如 `fontSize` → `font-size`）。WXS 兼容性由编译器自动处理。
 
+### 8. v-model 双向绑定
+
+支持原生表单标签与自定义组件的 `v-model` / `v-model:xxx`，包括 `v-for` 场景。
+
+```vue
+<!-- 原生标签 -->
+<input v-model="text" />
+<switch v-model="on" />
+<textarea v-model="content" />
+
+<!-- 自定义组件（默认 modelValue，可指定参数名） -->
+<MyComp v-model="title" />
+<MyComp v-model:title="title" />
+
+<!-- v-for 内按索引回写 -->
+<view v-for="(item, index) in list" :key="item.id">
+  <input v-model="item.name" />
+</view>
+```
+
+**支持的原生标签与事件映射：**
+
+| 标签                     | 绑定属性  | 监听事件   |
+| ------------------------ | --------- | ---------- |
+| `input` / `textarea`     | `value`   | `input`    |
+| `switch`                 | `checked` | `change`   |
+| `slider`                 | `value`   | `changing` |
+| `picker` / `picker-view` | `value`   | `change`   |
+| `radio-group`            | `value`   | `change`   |
+
+**修饰符：**
+
+| 修饰符    | 行为                                                                            |
+| --------- | ------------------------------------------------------------------------------- |
+| `.number` | setter 内转数字（空字符串保持为空串）                                           |
+| `.trim`   | setter 内 `String.prototype.trim()`                                             |
+| `.lazy`   | **暂不支持**：VMS 未实现 Vue 的 `modelModifiers` 传递，写了不会生效，故编译报错 |
+
+> `.number` 与 `.trim` 可组合使用；编译顺序固定为**先 trim 再转数字**，
+> 与 Vue 一致，例如 `v-model.number.trim="v"` 输入 `" 3 "` 得到数字 `3`。
+
+> **修饰符适用范围**：`.trim` 与 `.number` 只对**字符串值**有意义，
+> 因此仅 `input` / `textarea` 与自定义组件可用。
+> `switch`（boolean）、`slider` / `picker`（number）使用这两个修饰符会编译报错——
+> 对 boolean/number 调用 `.trim()` 会抛 TypeError，`.number` 则会把 boolean 静默转成 1/0。
+
+**与显式事件共存：** `v-model` 生成的 setter 与用户显式写的同名事件会**合并执行**
+（先回写数据，再调用用户回调），不会互相覆盖：
+
+```vue
+<input v-model="a" @input="onIn" />
+<!-- 编译结果：bind:input 指向桥接函数，内部依次调用回写 setter 与 onIn -->
+```
+
+**编译期校验（会直接报错，不会静默生成错误代码）：**
+
+| 非法用法                             | 报错原因                                      |
+| ------------------------------------ | --------------------------------------------- |
+| `v-model="a + b"`                    | 绑定目标必须是变量或成员表达式                |
+| `v-model`（无值）                    | 缺少绑定值                                    |
+| `v-model="'lit'"` / `{ a: 1 }` `123` | 不可写目标（非变量）                          |
+| `v-model="'a'.length"` / `fn().x`    | 成员表达式的根必须是变量                      |
+| `v-model="wx"` / `console`           | 全局变量不参与 `__vmsProxyRefs`，不可双向绑定 |
+| `v-model="prop"`                     | `defineProps` 解构出的 props 是只读的         |
+| `v-model="index"`                    | `v-for` 索引变量不可写                        |
+| `v-model:[key]`                      | 动态参数无法在编译期确定属性/事件名           |
+| `checkbox` / `radio` 上的 `v-model`  | `detail.value` 为数组，语义不匹配             |
+| `<form v-model>`                     | 未映射的原生标签                              |
+| `v-model.foo`                        | 未知修饰符                                    |
+
+### 9. defineModel 编译宏
+
+子组件用 `defineModel` 声明可双向绑定的属性，配合父组件 `v-model` / `v-model:xxx` 使用：
+
+```vue
+<script setup lang="ts">
+// 默认 prop 名 modelValue
+const model = defineModel<string>()
+
+// 自定义 prop 名，配合父组件 v-model:title
+const title = defineModel<string>('title')
+
+// 带默认值
+const count = defineModel<number>({ default: 0 })
+
+const rename = () => {
+  title.value = 'new' // 触发 update:title 事件回传父组件
+}
+</script>
+```
+
+**编译结果：** `defineModel` 被编译为 `customRef`——`get` 读 `__vmsProps.xxx`，`set` 调用 `triggerEvent('update:xxx', value)`，并自动注册对应的 `properties` 项。
+
+该变量在组件内可直接用于 `v-model`（如 `<input v-model="title" />`）：
+写入经 `__vmsProxyRefs` 解包到 `customRef.value`，由 `customRef` 的 setter
+触发 `update` 事件回传父组件，**不会**直接写 `__vmsProps`。
+
+**限制：** 只支持 `defineModel()`、`defineModel('name')`、`defineModel({ default: value })` 形式；`get`/`set` 转换器等 options 会编译报错（宏调用被移除，不会残留 `ReferenceError`）。
+
+属性名支持 kebab-case（如 `defineModel('user-name')`），配合父组件
+`v-model:user-name` 使用，编译产物以字符串键注册、以计算成员访问：
+
+```js
+properties: { "user-name": { type: null } }
+// getter: __vmsProps["user-name"]
+// setter: triggerEvent("update:user-name", value)
+```
+
 ## 插槽
 
 ### 已支持
@@ -362,11 +531,75 @@ VMS 支持完整的 Vue `:style` 语法。
 </template>
 ```
 
+### 作用域插槽
+
+支持作用域插槽（`<slot :item="item" />` + `<template #item="{ item }">`），也支持在 `v-for` 内混用外层循环变量与槽变量。
+
+> **必须开启 glass-easel**：作用域插槽基于 glass-easel 的 `dynamicSlots` 能力实现，需在 `vms.config.js` 中设置 `glassEasel: true`（要求小程序基础库 >= 3.8.12）。
+> 未开启时编译不报错，但作用域数据不会传递到插槽内容。默认插槽与具名插槽不依赖该开关。
+
+```vue
+<!-- 子组件：导出数据 -->
+<template>
+  <view v-for="(item, index) in items" :key="item.id">
+    <slot name="row" :item="item" :index="index" />
+  </view>
+</template>
+
+<!-- 父组件：接收数据（槽变量不会进入父组件 data） -->
+<MyList>
+  <template #row="{ item, index }">
+    <text>{{ index }}-{{ item.name }}</text>
+  </template>
+</MyList>
+```
+
+### 编译结果（对照 glass-easel 规范）
+
+```vue
+<!-- 子组件：在 v-for 中导出数据 -->
+<view v-for="(item, index) in items" :key="item.id">
+  <slot name="row" :item="item" :index="index" />
+</view>
+```
+
+```html
+<!-- 编译结果：具名 + 作用域属性并存 -->
+<view wx:for="{{items}}" wx:key="id">
+  <slot name="row" item="{{item}}" index="{{index}}" />
+</view>
+```
+
+```vue
+<!-- 父组件接收 -->
+<MyList>
+  <template #row="{ item, index }">
+    <text>{{ item.name }}</text>
+  </template>
+</MyList>
+```
+
+```html
+<!-- 编译结果：slot="row" 定向插入 + slot:xxx 接收数据 -->
+<MyList>
+  <text slot="row" slot:item slot:index>{{item.name}}</text>
+</MyList>
+```
+
+- 具名插槽输出 `slot="<name>"`；默认插槽不输出该属性
+- 接收数据输出 `slot:xxx`；需别名时输出 `slot:xxx="alias"`
+- 接收入口须与 `<slot>` 出口的绑定属性名一一对应（`:item` → `slot:item`）
+
 ### 插槽限制
 
-- **不支持作用域插槽**（`<template #item="{ data }">`）
 - **插槽内容必须使用标签包裹**，不能直接写文本
 - 空插槽会被替换为注释节点
+- 作用域插槽需开启 `glassEasel`，且基础库 >= 3.8.12
+- **不支持动态插槽名**（`v-slot:[name]`）：小程序 slot 名须在编译期确定，使用会编译报错
+- **槽数据在父组件中只读**：不能对插槽变量本身或其派生数据使用 `v-model`，
+  包括经 `v-for` 间接写入的情况（如 `<template #row="{ items }">` 内
+  `v-for="it in items"` + `v-model="it.name"`）。这类写法会编译报错，
+  需要修改时请在子组件内更新源数据，或先同步到父组件的 `ref`
 
 ### template 节点转 block 规则
 
@@ -522,16 +755,27 @@ onLoad((options) => {
 
 ### 不支持的 Vue 特性
 
-| 特性              | 说明                                  |
-| ----------------- | ------------------------------------- |
-| `v-model`         | 不支持双向绑定                        |
-| `defineModel`     | 编译宏不支持                          |
-| `defineSlots`     | 编译宏不支持                          |
-| `v-bind="obj"`    | 需要逐个绑定属性                      |
-| 组合式函数        | `useTemplateRef`, `useSlots` 等不支持 |
-| Vue 内置组件      | `<transition>`, `<keep-alive>` 等     |
-| 作用域插槽        | 不支持数据传递给插槽                  |
-| `.prevent` 修饰符 | 需手动处理阻止默认行为                |
+**下表所有项均为「编译报错」：写了会立即失败并给出替代方案，不会静默出错。**
+（`v-html`、`checkbox`/`radio` 的 v-model、`.prevent` 等均已如此处理，可放心依赖该行为。）
+
+| 特性                              | 说明                                                   | 行为       | 替代方案                                                                                          |
+| --------------------------------- | ------------------------------------------------------ | ---------- | ------------------------------------------------------------------------------------------------- |
+| `defineSlots`                     | 编译宏                                                 | 编译报错   | 小程序无插槽类型声明机制，可直接删除                                                              |
+| `withDefaults`                    | 编译宏                                                 | 编译报错   | 用响应式 Props 解构默认值（Vue 3.5+）                                                             |
+| `v-html`                          | 原始 HTML                                              | 编译报错   | `<rich-text nodes="{{...}}" />`                                                                   |
+| `v-text`                          | 文本内容                                               | 编译报错   | `<text>{{ value }}</text>`                                                                        |
+| `v-once` / `v-memo`               | 渲染优化                                               | 编译报错   | 小程序无需此优化，直接移除                                                                        |
+| `v-cloak`                         | 防闪烁                                                 | 编译报错   | 小程序无此问题，直接移除                                                                          |
+| Vue 内置组件                      | `<Teleport>` `<Transition>` `<KeepAlive>` `<Suspense>` | 编译报错   | 见各项替代方案；小写变体同样报错                                                                  |
+| `<component :is>`                 | 动态组件                                               | 编译报错   | 改用 `wx:if`/`wx:elif` 按条件渲染                                                                 |
+| 组合式函数                        | `useTemplateRef`, `useSlots` 等                        | 类型报错\* | 不支持                                                                                            |
+| `v-bind="obj"`                    | 整体绑定对象                                           | 编译报错   | WXML 无法展开对象；逐个绑定 `:id="obj.id"`                                                        |
+| `v-on="handlers"`                 | 整体绑定事件                                           | 编译报错   | WXML 无法展开对象；逐个绑定 `@tap="h.tap"`                                                        |
+| `.prevent` / `.self` / `.once` 等 | 事件修饰符                                             | 编译报错   | 小程序事件无对应语义；见错误信息。`.stop`/`.mut`/`.capture`/`.capture-stop`/`.raw` **有映射可用** |
+| `checkbox` / `radio` 的 v-model   | 事件值类型不匹配                                       | 编译报错   | `detail.value` 是数组；改用 `:checked` + 事件                                                     |
+
+\* 组合式函数由 `@unmagic/vue-mini` 的类型声明覆盖：TypeScript 报
+`has no exported member`。VMS 编译器不做 API 白名单校验。
 
 ### 命名注意事项
 
@@ -629,4 +873,4 @@ CLI 层 (cli.ts)        → 构建流程控制、文件监听、依赖扫描
     └── collectImports.ts   → 依赖收集
 ```
 
-**核心技术：** `@vue/compiler-sfc` 解析 + `@babel/core` 转换 + `rollup` 打包
+**核心技术：** `@vue/compiler-sfc` 解析 + `@babel/core` 转换 + `rolldown` 打包

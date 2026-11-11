@@ -32,7 +32,7 @@ export interface UserConfig {
   sourceDir?: string
   outputDir?: string
   component?: ComponentMatchConfig
-  /** 是否启用缓存统计，默认 false。开启后可通过 globalCacheStats.generateReport() 查看统计报告，但会带来额外性能开销 */
+  /** 预留：缓存统计开关。当前版本尚未实现，设置该字段不会产生任何效果 */
   cacheStats?: boolean
   /**
    * 跳过 Babel 编译、直接复制的文件匹配规则（字符串包含匹配）
@@ -40,4 +40,10 @@ export interface UserConfig {
    * 例如：['utils/big.js', 'ec-canvas/']
    */
   copyOnly?: string[]
+  /**
+   * 启用 glass-easel 组件框架（小程序基础库 >= 3.8.12）。
+   * 开启后会在每个组件 JSON 中写入 componentFramework: 'glass-easel' 与
+   * glassEaselWebview: true；作用域插槽的 dynamicSlots 能力依赖该开关。
+   */
+  glassEasel?: boolean
 }

@@ -153,12 +153,28 @@ export function transformTemplateStyle(
             if (expr.type === 'StringLiteral' || expr.type === 'TemplateLiteral') {
               return t.returnStatement(expr)
             }
+            if (t.isIdentifier(expr) || t.isMemberExpression(expr)) {
+              // 变量形式的 :style（如 :style="objStyle"）。
+              // 运行时该变量可能是**对象**（Vue 允许 { color: 'red' }）或字符串；
+              // 若原样输出为 style="{{objStyle}}"，对象会被塞进字符串属性，
+              // 样式静默失效（实测渲染为无色，而字符串变量正常）。
+              // styleToString 对字符串原样返回、对对象转换为 'k:v;k:v'，
+              // 因此统一经它处理对两种类型都安全。
+              return t.returnStatement(
+                t.callExpression(
+                  t.memberExpression(t.identifier('__vmsWXSUtils'), t.identifier('styleToString')),
+                  [expr],
+                ),
+              )
+            }
             if (t.isExpression(expr)) {
               return t.returnStatement(expr)
             }
             return item
           })
         },
+        // :style 的值必须是字符串：变量可能是对象，交由 styleToString 统一转换
+        true,
       )
       styleContentList.push(content)
     }

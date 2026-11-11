@@ -327,6 +327,28 @@ describe('5.3 wxsUtils.wxs polyfill functions', () => {
     it('returns empty string for null input', () => {
       expect(wxsUtils.padStart(null, 3, '0')).toBe('')
     })
+
+    // 回归：多字符填充串在需要截断时必须保留**前缀**。
+    // 旧实现取重复后字符串的尾部，'a'.padStart(5,'abc') 得到 'cabca'（应为 'abcaa'）；
+    // 单字符填充串不会暴露该问题，因此原有用例全部通过。
+    it('多字符填充串需要截断时保留前缀（与原生一致）', () => {
+      expect(wxsUtils.padStart('a', 5, 'abc')).toBe('a'.padStart(5, 'abc'))
+      expect(wxsUtils.padStart('x', 6, 'ab')).toBe('x'.padStart(6, 'ab'))
+      expect(wxsUtils.padStart('5', 7, 'ab')).toBe('5'.padStart(7, 'ab'))
+    })
+
+    it('填充串恰好整除时结果与原生一致', () => {
+      expect(wxsUtils.padStart('5', 7, 'ab')).toBe('5'.padStart(7, 'ab'))
+      expect(wxsUtils.padStart('', 4, 'xy')).toBe(''.padStart(4, 'xy'))
+    })
+
+    it('空填充串返回原字符串', () => {
+      expect(wxsUtils.padStart('ab', 5, '')).toBe('ab')
+    })
+
+    it('目标长度小于原长度时返回原字符串', () => {
+      expect(wxsUtils.padStart('abc', 2, 'z')).toBe('abc')
+    })
   })
 
   describe('padEnd', () => {
@@ -335,6 +357,15 @@ describe('5.3 wxsUtils.wxs polyfill functions', () => {
     })
     it('returns empty string for null input', () => {
       expect(wxsUtils.padEnd(null, 3, '0')).toBe('')
+    })
+
+    it('多字符填充串结果与原生一致（padEnd 无截断侧问题）', () => {
+      expect(wxsUtils.padEnd('a', 5, 'abc')).toBe('a'.padEnd(5, 'abc'))
+      expect(wxsUtils.padEnd('x', 6, 'ab')).toBe('x'.padEnd(6, 'ab'))
+    })
+
+    it('空填充串返回原字符串', () => {
+      expect(wxsUtils.padEnd('ab', 5, '')).toBe('ab')
     })
   })
 

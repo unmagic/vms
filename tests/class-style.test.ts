@@ -222,7 +222,11 @@ const inlineStyle = ref('color: red;')
       const { wxml, error } = await compileVueContent(vueContent)
 
       expect(error).toBeNull()
-      expect(wxml).toContain('{{inlineStyle}}')
+      // :style 的值必须是字符串。变量在运行时可能是**对象**，
+      // 直接输出 {{inlineStyle}} 会把对象塞进字符串属性、样式静默失效。
+      // 因此统一经 styleToString（字符串原样返回、对象转 'k:v;k:v'）。
+      expect(wxml).toContain('styleToString(inlineStyle)')
+      expect(wxml).not.toContain('{{inlineStyle}}')
     })
 
     it('4.3 静态 style 与动态 :style 共存', async () => {

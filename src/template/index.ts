@@ -36,6 +36,45 @@ import { generate } from '@babel/generator'
 import { getComponentMatcher, WXS_NAMESPACE } from '@/utils/constants'
 import { getPolyfillFileRelativePath } from '@/utils/tools'
 import { propTransformers, mergePropResults, type TransformerContext } from './propTransformers'
+import { createCompileError } from '@/utils/errorHandler'
+
+/**
+ * Vue 内置组件：小程序没有对应实现，必须编译报错。
+ *
+ * 若放行，它们会作为**未注册的自定义组件**出现在产物中
+ * （`usingComponents` 里没有对应条目），小程序运行时不渲染任何内容。
+ * 这属于"文档说不支持、编译期却不拦截"的静默失效。
+ *
+ * 注意：只拦截 Vue 的内置组件名。同名的小写标签（如 `<transition>`）
+ * 或用户自己注册的同名组件不在拦截范围——后者由 usingComponents 正常处理。
+ */
+const BUILT_IN_COMPONENTS: Record<string, string> = {
+  Teleport: '小程序无传送门机制，请把内容直接写在目标位置',
+  teleport: '小程序无传送门机制，请把内容直接写在目标位置',
+  Transition: '小程序过渡动画请使用 CSS transition/animation 或 wx.createAnimation',
+  TransitionGroup: '小程序过渡动画请使用 CSS transition/animation',
+  transition: '小程序过渡动画请使用 CSS transition/animation',
+  'transition-group': '小程序过渡动画请使用 CSS transition/animation',
+  BaseTransition: '小程序过渡动画请使用 CSS transition/animation',
+  'base-transition': '小程序过渡动画请使用 CSS transition/animation',
+  KeepAlive: '小程序页面天然缓存，组件级缓存请用 wx:if 配合状态保持',
+  'keep-alive': '小程序页面天然缓存，组件级缓存请用 wx:if 配合状态保持',
+  Suspense: 'VMS 为同步编译，无异步组件加载概念，可直接移除',
+  suspense: 'VMS 为同步编译，无异步组件加载概念，可直接移除',
+  // 仅小写 `component` 是 Vue 的动态组件（与 Vue 的 isComponent 判定一致）
+  component:
+    '小程序无动态组件机制（无 <component :is>）。请改用 wx:if / wx:elif 按条件渲染各候选组件',
+}
+
+function assertNoBuiltInComponent(node: any): void {
+  if (node.type !== NodeTypes.ELEMENT) return
+  const tag = (node as ElementNode).tag
+  // 仅拦截 PascalCase 的 Vue 内置组件名（模板中用户组件通常也是 PascalCase，
+  // 但内置名是保留的，不存在合法用户组件与之同名）
+  const advice = BUILT_IN_COMPONENTS[tag]
+  if (!advice) return
+  throw createCompileError(`<${tag}> 是 Vue 内置组件，小程序不支持：${advice}`, node.loc ?? null)
+}
 
 function parseTemplate(
   templateAST: RootNode,
@@ -85,13 +124,16 @@ function parseTemplate(
   )
 
   const nodeTransforms: NodeTransform[] = [
+    // 0. Vue 内置组件：小程序无对应实现，必须报错
+    (node) => assertNoBuiltInComponent(node),
+
     // 1. 收集第三方组件
     ...(getComponentMatcher.hasConfig()
       ? [(node: any) => collectThirdComponents(node, thirdPartyComponents)]
       : []),
 
     // 2. 处理 slot 和 template（保持兼容）
-    (node) => transformSlotsAndTemplate(node),
+    (node) => transformSlotsAndTemplate(node, ctx),
 
     // 3. class 和 style 转换（包括根节点注入逻辑）
     (node) =>
@@ -126,6 +168,7 @@ function parseTemplate(
     internalVars: ctx.internalVars,
     renderVars: ctx.renderVars,
     needsProxyRefs: ctx.needsProxyRefs,
+    hasDynamicSlots: ctx.hasDynamicSlots,
   }
 }
 

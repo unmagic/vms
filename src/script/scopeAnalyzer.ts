@@ -8,12 +8,7 @@ import * as t from '@babel/types'
 import { traverse } from '@/utils/babelTraverse'
 import type { ScriptScope, VariableInfo } from '@/types/scope'
 import { isGlobalVariable } from '@/utils/globalWhitelist'
-import {
-  createCompileError,
-  extractErrorLoc,
-  getErrorMessage,
-  handleCompileError,
-} from '@/utils/errorHandler'
+import { createCompileError, extractErrorLoc, getErrorMessage } from '@/utils/errorHandler'
 
 /**
  * 创建空的 ScriptScope
@@ -38,11 +33,19 @@ export interface ScriptAnalysisResult {
 
 /**
  * 分析脚本作用域
+ *
+ * 解析失败时**只抛错、不打印**——调用链上层（transformer.ts → cli.ts）
+ * 有统一的错误展示，重复打印会导致同一错误出现多份（含多份堆栈），干扰排查。
+ *
  * @param scriptContent script 内容
- * @param filePath 文件路径（用于错误信息展示）
+ * @param _filePath 文件路径。保留该形参是为了维持调用签名稳定；
+ *   错误展示已由上层统一处理，此处不再使用。
  * @returns ScriptAnalysisResult（包含 scope 和解析后的 AST，供后续阶段复用，避免重复解析）
  */
-export function analyzeScriptScope(scriptContent: string, filePath?: string): ScriptAnalysisResult {
+export function analyzeScriptScope(
+  scriptContent: string,
+  _filePath?: string,
+): ScriptAnalysisResult {
   const scope = createEmptyScriptScope()
 
   let ast: t.File
@@ -83,11 +86,8 @@ export function analyzeScriptScope(scriptContent: string, filePath?: string): Sc
       // 2. 收集变量声明（包括宏和 props）
       VariableDeclaration(path) {
         path.node.declarations.forEach((decl) => {
-          if (!t.isIdentifier(decl.id)) return
-
-          const name = decl.id.name
-
-          // 检查是否是宏声明（defineProps, defineEmits, defineContext）
+          // 宏声明（defineProps/defineEmits/defineContext）的 id 可能是
+          // ObjectPattern（解构式 defineProps），需在 isIdentifier 判断前处理
           if (decl.init && t.isCallExpression(decl.init)) {
             const calleeName = t.isIdentifier(decl.init.callee) ? decl.init.callee.name : ''
 
@@ -103,6 +103,10 @@ export function analyzeScriptScope(scriptContent: string, filePath?: string): Sc
                 return // 跳过 declarations 收集
             }
           }
+
+          if (!t.isIdentifier(decl.id)) return
+
+          const name = decl.id.name
 
           // 普通变量声明
           scope.declarations.set(name, {
@@ -130,17 +134,16 @@ export function analyzeScriptScope(scriptContent: string, filePath?: string): Sc
       },
     })
   } catch (error: unknown) {
-    // babel parse 错误的 loc 在 error.loc 上，适配为 CompileError 的 cause.loc 格式
+    // 这里**不打印**，只负责把错误规范化后向上抛：
+    // 调用链上层（transformer.ts → cli.ts）已有统一的错误展示。
+    // 此前本函数既打印又 rethrow，导致同一个语法错误被输出**两次**
+    // （一次带脚本片段、一次带完整 SFC 片段），且各带一份完整堆栈，
+    // 与 cli.ts 中"transformer 内部已调用 handleCompileError、此处不重复打印"
+    // 的注释相矛盾。
     const loc = extractErrorLoc(error)
     if (loc) {
-      const compileError = createCompileError(getErrorMessage(error), loc)
-      handleCompileError(scriptContent, compileError, filePath)
-      throw compileError
+      throw createCompileError(getErrorMessage(error), loc)
     }
-
-    console.error(
-      `❌ Failed to parse script${filePath ? ` in ${filePath}` : ''}: ${getErrorMessage(error)}`,
-    )
     throw error
   }
 

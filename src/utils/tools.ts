@@ -2,7 +2,7 @@ import type { VForInfo, VMSRootNode, VMSTemplateChildNode, VMSEnhancedNode } fro
 import path from 'node:path'
 import fs from 'fs-extra'
 import { red } from 'kolorist'
-import { getErrorMessage } from '@/utils/errorHandler'
+import { createCompileError, getErrorMessage } from '@/utils/errorHandler'
 import {
   POLYFILL_OUTPUT_DIR,
   POLYFILL_VMS_DIR,
@@ -10,7 +10,7 @@ import {
   OUTPUT_DIR,
   __IS_PROD__,
 } from '@/utils/constants'
-import { NodeTypes } from '@vue/compiler-core'
+import { NodeTypes, type SimpleExpressionNode } from '@vue/compiler-core'
 
 /**
  * 判断 v-for 的 item 是否为解构式（ObjectPattern / ArrayPattern）
@@ -83,6 +83,45 @@ export function getVForIndexName(vForInfo: VForInfo): string | undefined {
     return forParseResult.key.content
   }
   return undefined
+}
+
+/**
+ * 收集一层嵌套中每级 v-for 的 index 变量名。
+ *
+ * 嵌套 wx:for 若各级使用同名 index，WXML 中内层会遮蔽外层，
+ * 而编译期需要在同一作用域内按序解构出各级索引，会生成非法的重复声明：
+ *   const { a: [index, index] } = e.currentTarget.dataset
+ * 同时 WXML 侧 `{{[index,index]}}` 也只能取到内层值，无法携带外层索引。
+ *
+ * 这种情况下无法在保持用户原有变量名的前提下正确转译（重命名外层会破坏
+ * 外层作用域中对 index 的引用），因此直接报编译错误，由用户显式改名。
+ */
+export function getVForIndexNames(vForInfoList: VForInfo[]): string[] {
+  return vForInfoList.map((info) => getVForIndexName(info) || 'index')
+}
+
+/**
+ * 校验同一嵌套链上"显式书写"的 index 变量名互不重复。
+ *
+ * 仅检查用户显式写出的 index 名：未显式书写时编译器会生成唯一的
+ * `_<item>_<n>_index`，不会冲突。只有两级都显式写成同名（如都用 index）
+ * 时才无法正确转译。
+ *
+ * @throws CompileError 存在显式重名时抛出，提示用户为其中一层改名
+ */
+export function assertUniqueVForIndexNames(vForInfoList: VForInfo[]): void {
+  const explicitNames = vForInfoList
+    .filter((info) => info.forParseResult.key?.type === NodeTypes.SIMPLE_EXPRESSION)
+    .map((info) => (info.forParseResult.key as SimpleExpressionNode).content)
+
+  const duplicated = explicitNames.find((name, i) => explicitNames.indexOf(name) !== i)
+  if (duplicated) {
+    throw createCompileError(
+      `嵌套 v-for 的 index 变量名重复（"${duplicated}"）：小程序中内层会遮蔽外层，` +
+        `无法同时取到各级索引。请为其中一层指定不同的变量名，` +
+        `例如 v-for="(item, index) in list" 与 v-for="(child, childIndex) in item.children"。`,
+    )
+  }
 }
 
 /**
@@ -183,14 +222,12 @@ export async function copyPolyfillFiles() {
 
     // 检查源目录是否存在
     if (await fs.pathExists(POLYFILL_VMS_DIR)) {
-      // 检查目标目录是否已存在
-      const outputExists = await fs.pathExists(POLYFILL_OUTPUT_DIR)
-      if (outputExists) {
-        // 如果目标目录已存在，跳过复制
-        return
-      }
-      // 复制所有polyfill文件到目标目录
-      await fs.copy(POLYFILL_VMS_DIR, POLYFILL_OUTPUT_DIR)
+      // 目标目录存在时也必须覆盖复制，不能直接跳过：
+      // polyfill 文件（wxsUtils.wxs）会随编译器版本更新，
+      // 若因"产物目录已存在"而跳过，改动后的 polyfill **永远不会**进入
+      // dist——表现为修复了 polyfill 但真机行为不变，属静默失效。
+      // fs.copy 默认 overwrite: true，可安全地覆盖同名文件。
+      await fs.copy(POLYFILL_VMS_DIR, POLYFILL_OUTPUT_DIR, { overwrite: true })
     } else {
       console.log(red('Polyfill源文件夹不存在：' + POLYFILL_VMS_DIR))
     }
@@ -221,7 +258,18 @@ export async function copyProjectConfigFile() {
     // 移除 miniprogramRoot/srcMiniprogramRoot，因为输出目录即为小程序根目录
     Reflect.deleteProperty(config, 'miniprogramRoot')
     Reflect.deleteProperty(config, 'srcMiniprogramRoot')
-    config.projectName = config.projectName + (__IS_PROD__ ? '-prod' : '-dev')
+
+    // 项目名附加 -dev / -prod，便于在开发者工具中区分两个产物目录。
+    // 注意字段名是**全小写** `projectname`（官方《项目配置文件》定义），
+    // 不是 `projectName`——此前误用驼峰，导致读不到原值而生成
+    // `"projectName": "undefined-dev"` 这样的字段（多余且值无意义）。
+    const suffix = __IS_PROD__ ? '-prod' : '-dev'
+    const baseName =
+      typeof config.projectname === 'string' && config.projectname !== ''
+        ? config.projectname
+        : // 未配置 projectname 时退回用源目录名，避免产生 "undefined-*"
+          path.basename(process.cwd())
+    config.projectname = baseName.endsWith(suffix) ? baseName : baseName + suffix
     await fs.writeFile(
       path.join(OUTPUT_DIR, 'project.config.json'),
       JSON.stringify(config, null, 2),

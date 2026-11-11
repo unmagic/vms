@@ -2,6 +2,7 @@ import { parse as parseSFC } from '@vue/compiler-sfc'
 import { parseTemplate } from '../src/template'
 import { parseScript, analyzeScriptScope, createEmptyScriptScope } from '../src/script'
 import { deepMerge } from '../src/utils/merge'
+import { createBaseJsonConfig } from '../src/utils/jsonConfig'
 
 export interface JsonConfig {
   component: boolean
@@ -18,6 +19,7 @@ export interface JsonConfig {
 export async function compileVueContent(
   vueContent: string,
   isPage = false,
+  options: { glassEasel?: boolean } = {},
 ): Promise<{
   js: string
   wxml: string
@@ -54,6 +56,7 @@ export async function compileVueContent(
       internalVars,
       renderVars,
       needsProxyRefs,
+      hasDynamicSlots,
     } = parseTemplate(template.ast, 'test.vue', isPage, scriptScope)
 
     // 3. 转换 script（纯模板组件传递 isTemplateOnly 标志）
@@ -68,6 +71,7 @@ export async function compileVueContent(
       isPage,
       scriptScope,
       scriptAnalysis.ast,
+      hasDynamicSlots,
     )
 
     // 4. 生成 JSON 配置（模拟 transformer.ts 的逻辑）
@@ -85,11 +89,12 @@ export async function compileVueContent(
       usingComponents[key] = value
     })
 
-    const baseJsonConfig: Record<string, unknown> = {
-      component: true,
-      styleIsolation: isPage ? 'shared' : 'apply-shared',
+    // 复用 transformer 的真实实现，避免测试与构建产物产生偏差
+    const baseJsonConfig = createBaseJsonConfig(
+      isPage,
       usingComponents,
-    }
+      Boolean(options.glassEasel),
+    )
     const jsonConfig = result.defineOptionsObject
       ? deepMerge(baseJsonConfig, result.defineOptionsObject)
       : baseJsonConfig

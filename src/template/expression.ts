@@ -40,14 +40,44 @@ export function sanitizeWxsIdentifierName(name: string): string {
 
 /**
  * 对降级后的 AST 进行 WXS 兼容性清理（AST 级处理，不会误伤字符串字面量）
- * - 标识符中的 $ → _（WXS 不支持 $ 标识符）
- * - void 0 → undefined（WXS 不支持 void 关键字）
+ *
+ * 处理内容（每项都以"产物在 WXS 中必须合法"为准）：
+ *  - **变量名**中的 `$` → `_`（WXS 不支持 `$` 标识符）
+ *  - **属性名**中的 `$` → 改用计算成员/字符串键
+ *    （`obj.$v` → `obj["$v"]`，`{ $k: 1 }` → `{ "$k": 1 }`）
+ *  - `void 0` → `undefined`（WXS 不支持 `void` 关键字）
+ *
+ * 为什么属性名既不能改名也不能原样保留：
+ *  - 改成 `obj._v` 会读一个**不存在的属性**（数据的键仍是 `$v`），静默取到 undefined
+ *  - 原样保留 `obj.$v` 会让 `$` 作为**标识符**出现在 WXS 代码里，
+ *    违反 WXS 对 `$` 的限制，产物能否运行取决于工具链的宽松程度
+ *  - 计算成员 `obj["$v"]` 两者兼顾：键名精确、语法为 WXS 明确支持的带引号属性访问
+ *
  * 使用 VISITOR_KEYS 驱动遍历，只访问有效子节点，避免触碰 loc 等元数据
  */
 export function sanitizeWxsAst(node: t.Node): t.Node {
   const visitorKeys = t.VISITOR_KEYS[node.type]
   if (visitorKeys) {
     for (const key of visitorKeys) {
+      // 非计算成员表达式的 property 是**属性名**而非变量引用，
+      // 不能被重命名：obj.$value 的数据键就是 '$value'，
+      // 改成 obj._value 会去读一个不存在的属性（静默取到 undefined）。
+      if (
+        (node.type === 'MemberExpression' || node.type === 'OptionalMemberExpression') &&
+        key === 'property' &&
+        !node.computed
+      ) {
+        continue
+      }
+      // 对象字面量的 key 同理（{ $k: 1 } 的键名需保留）
+      if (
+        (node.type === 'ObjectProperty' || node.type === 'ObjectMethod') &&
+        key === 'key' &&
+        !node.computed
+      ) {
+        continue
+      }
+
       const value = (node as unknown as Record<string, unknown>)[key]
       if (Array.isArray(value)) {
         for (let i = 0; i < value.length; i++) {
@@ -60,6 +90,67 @@ export function sanitizeWxsAst(node: t.Node): t.Node {
         ;(node as unknown as Record<string, unknown>)[key] = sanitizeWxsAst(value as t.Node)
       }
     }
+  }
+
+  // 非计算成员 `obj.$v`：属性名含 `$` 时改写为计算成员 `obj["$v"]`。
+  // 键名保持不变，且产物中不再出现 `$` 标识符。
+  if (
+    (t.isMemberExpression(node) || t.isOptionalMemberExpression(node)) &&
+    !node.computed &&
+    t.isIdentifier(node.property) &&
+    node.property.name.includes('$')
+  ) {
+    node.property = t.stringLiteral(node.property.name)
+    node.computed = true
+  }
+
+  // 对象字面量的非计算 key `{ $k: 1 }`：同样改写为字符串键 `{ "$k": 1 }`
+  if (
+    (t.isObjectProperty(node) || t.isObjectMethod(node)) &&
+    !node.computed &&
+    t.isIdentifier(node.key) &&
+    node.key.name.includes('$')
+  ) {
+    node.key = t.stringLiteral(node.key.name)
+  }
+
+  // WXS 没有 Date / RegExp 构造函数，必须改用工厂函数：
+  //   官方《WXS 语法参考 · 数据类型》：
+  //     date  —— "生成 date 对象需要使用 getDate 函数"
+  //     regexp —— "生成 regexp 对象需要使用 getRegExp 函数"
+  //   而《基础类库》中 Date 只提供 parse / UTC / now 三个静态属性，
+  //   并不存在构造函数。因此 new Date(...) / new RegExp(...) 在 WXS 中
+  //   无法运行（运行时才会暴露），这里改写为等价的 WXS 写法。
+  //   注意保持 Object 等其它构造器不变——它们在 WXS 中存在。
+  if (t.isNewExpression(node) && t.isIdentifier(node.callee)) {
+    const ctor = node.callee.name
+    if (ctor === 'Date' || ctor === 'RegExp') {
+      return t.callExpression(
+        t.identifier(ctor === 'Date' ? 'getDate' : 'getRegExp'),
+        node.arguments,
+      )
+    }
+  }
+
+  // WXS 没有 String / Boolean 这两个全局函数（官方《基础类库》未列出；
+  // 已实测：String(123) 与 Boolean(1) 在模板中均渲染为**空字符串**，
+  // 而 Number / parseInt / isNaN 正常）。原样输出会静默产出空值，
+  // 因此改写为等价的 WXS 写法：
+  //   String(x)  ->  '' + x   字符串拼接触发 ToString
+  //   Boolean(x) ->  !!x      双重取反触发 ToBoolean
+  // 注意 Number 在 WXS 中存在（实测可用），不做改写。
+  if (
+    t.isCallExpression(node) &&
+    t.isIdentifier(node.callee) &&
+    (node.callee.name === 'String' || node.callee.name === 'Boolean')
+  ) {
+    const name = node.callee.name
+    if (name === 'String') {
+      if (node.arguments.length === 0) return t.stringLiteral('')
+      return t.binaryExpression('+', t.stringLiteral(''), node.arguments[0] as t.Expression)
+    }
+    if (node.arguments.length === 0) return t.booleanLiteral(false)
+    return t.unaryExpression('!', t.unaryExpression('!', node.arguments[0] as t.Expression))
   }
 
   if (t.isIdentifier(node) && node.name.includes('$')) {
@@ -173,7 +264,10 @@ export function fallbackParseExpression(
  * 递归改写表达式 AST 中的解构变量（如 { id, name } 解构出的 id/name）
  * 为 item 属性访问（item.id / item.name）。用于 WXML 文本插值与属性绑定。
  */
-function rewriteDestructuredVarsInAst(expr: t.Expression, vForInfoList: VForInfo[]): t.Expression {
+export function rewriteDestructuredVarsInAst(
+  expr: t.Expression,
+  vForInfoList: VForInfo[],
+): t.Expression {
   const process = (node: t.Expression): t.Expression => {
     if (t.isIdentifier(node)) {
       const resolved = resolveDestructuredVar(node.name, vForInfoList)
@@ -181,12 +275,17 @@ function rewriteDestructuredVarsInAst(expr: t.Expression, vForInfoList: VForInfo
       return node
     }
     if (t.isMemberExpression(node)) {
-      return t.memberExpression(process(node.object as t.Expression), node.property, node.computed)
+      // 计算成员（obj[expr]）的 property 是一个**表达式**，其中可能引用解构变量
+      // （如 map[id] 的 id 需改写为 item.id）；非计算成员的 property 是属性名，
+      // 必须原样保留。
+      const property = node.computed ? process(node.property as t.Expression) : node.property
+      return t.memberExpression(process(node.object as t.Expression), property, node.computed)
     }
     if (t.isOptionalMemberExpression(node)) {
+      const property = node.computed ? process(node.property as t.Expression) : node.property
       return t.optionalMemberExpression(
         process(node.object as t.Expression),
-        node.property,
+        property,
         node.computed,
         node.optional,
       )
@@ -389,6 +488,7 @@ function getTemplateNodeProp(
   wxsExpressionStatements: t.ExpressionStatement[],
   ctx: VMSTransformContext,
   wxsStatementsFun?: (statements: t.Statement[], lastIndex: number) => t.Statement[],
+  forceWxs = false,
 ): ExpressionCacheEntry {
   if (prop.exp?.type !== NodeTypes.SIMPLE_EXPRESSION) {
     return { content: '' }
@@ -398,12 +498,30 @@ function getTemplateNodeProp(
   const rawAst = prop.exp.ast
 
   // ast === false 说明 Vue compiler 解析失败，尝试用 babel 重新解析
-  const ast = fallbackParseExpression(rawAst, originalExpression)
+  let ast = fallbackParseExpression(rawAst, originalExpression)
+
+  // 简单标识符（如 :style="objStyle"）的 exp.ast 是 null，会落到下面的
+  // "简单路径"分支。但 forceWxs 要求走 WXS 求值（:style 需要把可能为对象的
+  // 变量经 styleToString 转成字符串），因此这里按需用 babel 补出 AST。
+  if (forceWxs && !ast && typeof originalExpression === 'string' && originalExpression) {
+    try {
+      const stmt = parse(originalExpression, {
+        sourceType: 'script',
+        plugins: ['typescript'],
+      }).program.body[0]
+      ast = stmt?.type === 'ExpressionStatement' ? stmt.expression : null
+    } catch {
+      ast = null
+    }
+  }
 
   const notSupportMethodsSet = ast ? detectPolyfillMethods(ast) : new Set<string>()
 
   if (ast) {
-    if (isComplexExpression(ast) || notSupportMethodsSet.size > 0) {
+    // forceWxs：即使表达式很简单（如单个标识符 :style="objStyle"）也强制走
+    // WXS 求值路径。:style 需要这种处理——变量可能是**对象**，
+    // 原样输出 style="{{objStyle}}" 会把对象塞进字符串属性而静默失效。
+    if (isComplexExpression(ast) || notSupportMethodsSet.size > 0 || forceWxs) {
       const hasExternalFunction = containsExternalFunctionInExpression(ast)
       if (!hasExternalFunction) {
         const wxsFunctionName = counter.generateWxsFunctionName()

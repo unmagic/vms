@@ -10,6 +10,8 @@ import { parseTemplate } from '@/template'
 import type { VueComponentImport } from '@/types/node'
 import { handleCompileError, getErrorMessage } from '@/utils/errorHandler'
 import { deepMerge } from '@/utils/merge'
+import { createBaseJsonConfig } from '@/utils/jsonConfig'
+import { yellow } from 'kolorist'
 import { userConfig } from './utils/constants'
 
 const srcDir = join(process.cwd(), userConfig.sourceDir as string)
@@ -77,6 +79,7 @@ export async function transformVueToMiniProgram(
       internalVars,
       renderVars,
       needsProxyRefs,
+      hasDynamicSlots,
     } = parseTemplate(template.ast, filePath, isPage, scriptScope)
 
     // 3. 转换 script（纯模板组件传递 null 作为 scriptSetup）
@@ -91,6 +94,7 @@ export async function transformVueToMiniProgram(
       isPage,
       scriptScope,
       scriptAnalysis.ast,
+      hasDynamicSlots,
     )
 
     // 4. 转换 styles
@@ -102,12 +106,27 @@ export async function transformVueToMiniProgram(
       await mkdir(componentDir, { recursive: true })
     }
 
-    // 生成json配置
-    const baseJsonConfig: Record<string, unknown> = {
-      component: true,
-      styleIsolation: isPage ? 'shared' : 'apply-shared',
-      usingComponents: generateUsingComponents(result.vueComponentImports, thirdPartyComponents),
+    // 作用域插槽依赖 glass-easel 的 dynamicSlots 能力。若组件使用了作用域插槽
+    // 但未开启 glassEasel，编译产物会带上 dynamicSlots 选项却缺少
+    // componentFramework: 'glass-easel'，插槽数据在真机上不会传递——
+    // 属于静默失效，因此这里明确告警（不中断构建，便于渐进迁移）。
+    if (hasDynamicSlots && !userConfig.glassEasel) {
+      const relativePath = relative(process.cwd(), filePath)
+      console.warn(
+        yellow(
+          `⚠️  ${relativePath} 使用了作用域插槽，但未开启 glassEasel。\n` +
+            `   作用域数据不会传递到插槽内容，请在 vms.config.js 中设置 glassEasel: true` +
+            `（需基础库 >= 3.8.12）。`,
+        ),
+      )
     }
+
+    // 生成json配置
+    const baseJsonConfig = createBaseJsonConfig(
+      isPage,
+      generateUsingComponents(result.vueComponentImports, thirdPartyComponents),
+      Boolean(userConfig.glassEasel),
+    )
     const jsonConfig = result.defineOptionsObject
       ? deepMerge(baseJsonConfig, result.defineOptionsObject)
       : baseJsonConfig

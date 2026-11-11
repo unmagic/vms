@@ -6,12 +6,20 @@ import type {
   VForInfo,
   VMSTransformContext,
 } from '@/types/node'
-import { collectBindingVarsWithAST, addProperty, getVForVariables, getVForInfoList } from '../tools'
+import {
+  collectBindingVarsWithAST,
+  addProperty,
+  getVForVariables,
+  getVForInfoList,
+  resolveDestructuredVar,
+} from '../tools'
 import { getVForItemName, getVForIndexName } from '@/utils/tools'
 import {
   getFunctionIndexChar,
   getASTWithVForItemFromProxyRefs,
   getASTWithoutVForItemFromProxyRefs,
+  resolveItemsToDeclare,
+  declareVForItems,
   EVENT_PARAM_NAME,
   type CallExpressionInfo,
   type VForItemUsage,
@@ -169,6 +177,21 @@ function processASTExpression(
       ctx,
       false,
     )
+  } else if (t.isUpdateExpression(ast)) {
+    // 处理自增/自减表达式：@tap="count++" / @tap="count--"
+    // 将更新表达式包装为 BlockStatement 处理
+    const wrappedBody = t.blockStatement([t.expressionStatement(ast)])
+    return processInlineArrowFunction(
+      wrappedBody,
+      [], // 更新表达式没有箭头函数参数
+      counter,
+      callExpressionWithArgs,
+      excludeBindingVars,
+      node,
+      returnValue,
+      ctx,
+      false,
+    )
   } else if (t.isSequenceExpression(ast)) {
     // 处理序列表达式（多个语句用分号分隔）
     // @tap="item.selected = true; console.log(item.name)"
@@ -201,7 +224,13 @@ function processASTExpression(
     )
   }
 
-  return ''
+  // 未识别的事件表达式形态：显式报错而非生成空事件处理器，
+  // 避免运行时事件静默失效
+  throw createCompileError(
+    `暂不支持的事件处理表达式：${generate(ast, { compact: true }).code}，` +
+      `请改用方法引用（onTap）、带参数调用（onTap(args)）、内联箭头函数或赋值表达式`,
+    ast.loc ?? null,
+  )
 }
 
 /**
@@ -224,6 +253,8 @@ function processCallableExpression(
   arrowFunctionArgumentNames?: Set<string>,
 ): string {
   const content = counter.generateFunctionPropertyName()
+  // 统一使用节点内 dataKey 计数器，与内联处理器共用编号空间，
+  // 避免同一节点上两类处理器分配到相同的 data-a 键
   const dataKey = getFunctionIndexChar(counter.nodeDataKeyIndex++)
   const args = argumentsAst ?? []
 
@@ -340,8 +371,19 @@ function handleMemberExpressionCallee(
     arrowFunctionArgumentNames,
   )
 
-  if (vForItemName.has(calleeName) && vForInfoList && vForInfoList.length > 0) {
-    // v-for item 方法：card.onClick(args) → data-a 只传索引
+  // v-for 的 item **与 index** 都是桥接函数内的局部变量：
+  // 前者经 data-a 索引还原，后者直接由 dataset 解构得到。
+  // 只判断 item 会让 index.go() 落入下面的"外部变量"分支，
+  // 被错误注册进组件 data（__vmsInternalState）并在运行时悬空。
+  const isVForIndexName =
+    vForInfoList?.some((info) => (getVForIndexName(info) || 'index') === calleeName) ?? false
+
+  if (
+    (vForItemName.has(calleeName) || isVForIndexName) &&
+    vForInfoList &&
+    vForInfoList.length > 0
+  ) {
+    // v-for item/index 方法：card.onClick(args) → data-a 只传索引
     const indices = vForInfoList.map((info) => getVForIndexName(info) || 'index')
     callExpressionWithArgs.set(content, {
       dataKey,
@@ -363,17 +405,28 @@ function handleMemberExpressionCallee(
       addProperty(returnValue, calleeName)
       ctx.internalVars.add(calleeName)
     }
+    // 在 v-for 中：参数里引用了 index（如 logger.log(index)）或外层 item 时，
+    // dataKey 需要传索引，否则桥接函数中 index 标识符悬空
+    const indices = vForInfoList
+      ? vForInfoList.map((info) => getVForIndexName(info) || 'index')
+      : []
+    const needsIndices =
+      vForInfoList &&
+      vForInfoList.length > 0 &&
+      Array.isArray(argumentsAst) &&
+      argumentsAst.length > 0
     callExpressionWithArgs.set(content, {
-      dataKey,
-      dataArgsAst: null,
+      dataKey: needsIndices ? dataKey : '',
+      dataArgsAst:
+        needsIndices && indices.length > 0 ? indices.map((idx) => t.identifier(idx)) : null,
       returnValueBodyAst: getASTWithoutVForItemFromProxyRefs(
         callee,
         argumentsAst,
         arrowFunctionArgumentNames,
         vForInfoList,
         vForItemName,
-        undefined,
-        false,
+        needsIndices ? dataKey : undefined,
+        needsIndices,
         ctx.scriptScope,
       ),
       isAsync: false,
@@ -464,7 +517,12 @@ function processArrowFunctionExpression(
     )
   }
 
-  return ''
+  // 未识别的箭头函数体形态：显式报错而非生成空事件处理器
+  throw createCompileError(
+    `暂不支持的内联事件函数体：${generate(ast, { compact: true }).code}，` +
+      `请改用函数调用、赋值或条件表达式`,
+    ast.loc ?? null,
+  )
 }
 
 /**
@@ -511,6 +569,7 @@ function createShortExprHandler(
 
   // 生成桥接函数
   const functionName = counter.generateFunctionPropertyName()
+  // dataKey 统一从节点内计数器分配，与可调用处理器共用编号空间
   const dataKey =
     vForInfoList && vForInfoList.length > 0 ? getFunctionIndexChar(counter.nodeDataKeyIndex++) : ''
 
@@ -547,6 +606,45 @@ function createShortExprHandler(
         ),
       ]),
     )
+
+    // 声明表达式中引用的 v-for item 局部变量（如 item.active && log(item.id) 中的 item）。
+    // 直接遍历表达式 AST 收集被引用的 item 名，不依赖 varsToCollect
+    //（varsToCollect 只含需要 proxyRefs 改写的 setup 变量）
+    const referencedItems = new Set<string>()
+    const allItemNames = new Set(vForInfoList.map((info) => getVForItemName(info)).filter(Boolean))
+    const scanReferencedItems = (node: t.Node | null | undefined): void => {
+      if (!node) return
+      if (t.isIdentifier(node) && allItemNames.has(node.name)) {
+        referencedItems.add(node.name)
+        return
+      }
+      const visitorKeys = t.VISITOR_KEYS[node.type]
+      if (!visitorKeys) return
+      for (const key of visitorKeys) {
+        const value = (node as unknown as Record<string, unknown>)[key]
+        if (Array.isArray(value)) {
+          for (const child of value) {
+            if (child && typeof child === 'object' && Object.hasOwn(child, 'type')) {
+              scanReferencedItems(child as t.Node)
+            }
+          }
+        } else if (value && typeof value === 'object' && Object.hasOwn(value, 'type')) {
+          scanReferencedItems(value as t.Node)
+        }
+      }
+    }
+    scanReferencedItems(body)
+    // 解构式 v-for 变量映射到所属层级的 item
+    for (const varName of varsToCollect) {
+      const resolved = resolveDestructuredVar(varName, vForInfoList)
+      if (resolved) {
+        referencedItems.add(getVForItemName(vForInfoList[resolved.level]))
+      }
+    }
+    if (referencedItems.size > 0) {
+      const itemsToDeclare = resolveItemsToDeclare(referencedItems, vForInfoList)
+      declareVForItems(itemsToDeclare, vForInfoList, statements, ctx.scriptScope)
+    }
   }
 
   // 重写表达式中的变量引用
@@ -570,6 +668,29 @@ function createShortExprHandler(
 }
 
 /**
+ * 小程序无对应语义、会被静默忽略的事件修饰符。
+ *
+ * 这些是 Vue 在**浏览器 DOM 事件模型**下提供的修饰符，小程序的事件系统
+ * （bind/catch/mut-bind/capture-*）没有等价能力。若静默忽略，产物看起来正常
+ * 但行为缺失——例如 `.prevent` 不阻止默认行为、`.once` 会重复触发。
+ * 按"产物必须符合小程序规范且不静默失效"的原则，这里编译期报错。
+ *
+ * 注意：`.stop`（→ catch:）、`.mut`（→ mut-bind:）、`.capture`（→ capture-bind:）、
+ * `.capture-stop`（→ capture-catch:）以及 `.raw`（保留事件名）**均有映射**，
+ * 不在此列。
+ */
+const UNSUPPORTED_EVENT_MODIFIERS: Record<string, string> = {
+  prevent: '小程序事件无"默认行为"概念，无需且无法阻止；请在业务逻辑中避免副作用',
+  self: '小程序事件对象无 target/currentTarget 区分能力，请在处理器内判断来源',
+  once: '小程序无一次触发机制，请在处理器内自行保证只执行一次（如加标志位）',
+  passive: '小程序无 passive 概念（不影响其滚动性能），可直接移除该修饰符',
+  exact: '小程序无键盘修饰符体系，可直接移除该修饰符',
+  left: '小程序无鼠标按键概念（移动端触摸事件），可直接移除该修饰符',
+  right: '小程序无鼠标按键概念（移动端触摸事件），可直接移除该修饰符',
+  middle: '小程序无鼠标按键概念（移动端触摸事件），可直接移除该修饰符',
+}
+
+/**
  * 处理事件名转换
  * 规则：
  * 1. 事件名原样保留，不做 click -> tap 转换
@@ -577,6 +698,7 @@ function createShortExprHandler(
  * 3. .mut 转为 mut-bind:
  * 4. .capture 转为 capture-bind:
  * 5. .capture-stop 转为 capture-catch:
+ * 6. 其余无小程序等价语义的修饰符（.prevent/.once/.self 等）编译报错
  */
 function processEventName(
   prop: VMSAttrOrDirectiveNode,
@@ -594,6 +716,14 @@ function processEventName(
   if (arg.type === NodeTypes.SIMPLE_EXPRESSION) {
     const eventName = arg.content
     const modifiers = prop.modifiers || []
+
+    // 无小程序等价语义的修饰符：报错而非静默忽略
+    for (const mod of modifiers) {
+      const advice = UNSUPPORTED_EVENT_MODIFIERS[mod.content]
+      if (advice) {
+        throw createCompileError(`.${mod.content} 修饰符不支持：${advice}`, mod.loc ?? prop.loc)
+      }
+    }
 
     // 检查修饰符
     const hasMutModifier = modifiers.some((item: any) => item.content === 'mut')
@@ -731,9 +861,10 @@ function processInlineArrowFunction(
   }
 
   // 4. 生成函数体
-  // dataKey 需要在 generateFunctionPropertyName 之后、存储之前计算
-  const functionIndex = counter.functionPropertyCounter - 1
-  const dataKey = vForInfoList && vForInfoList.length > 0 ? getFunctionIndexChar(functionIndex) : ''
+  // dataKey 统一使用节点内计数器，与可调用处理器共用编号空间，
+  // 避免同一节点上两类处理器分配到相同的 data-a 键
+  const dataKey =
+    vForInfoList && vForInfoList.length > 0 ? getFunctionIndexChar(counter.nodeDataKeyIndex++) : ''
 
   const functionBody = createInlineHandlerBody(
     body,

@@ -14,6 +14,7 @@ import type {
 } from '@/types/node'
 import type { VMSAttrOrDirectiveNode } from '@/types/node'
 import { getTemplateNodeProp } from './expression'
+import { createCompileError } from '@/utils/errorHandler'
 import * as t from '@babel/types'
 
 /**
@@ -174,6 +175,13 @@ export function transformVForProp(
  *
  * 注意：wx:key 只支持 item 的直接属性名（如 "id"），不支持嵌套路径（如 "subRow.id"）。
  * 对于嵌套路径，输出 *this 作为回退并发出警告。
+ *
+ * 【已核查，暂不改动】`:key="index"` → `wx:key="index"` 的语义存在歧义：
+ *   - 官方文档《列表渲染》称 `wx:key` 是"item 的字段名字符串"，
+ *     `wx:key="index"` 会被理解为读 `item.index`
+ *   - 但腾讯官方组件库 tdesign-miniprogram 的产物中大量使用
+ *     `wx:key="index"`（39 处），说明实践中被当作循环索引使用
+ *   证据不足以判定哪种解释正确，故保持现状；如需变更须先确认渲染器实现。
  */
 export function transformKeyProp(prop: VMSAttrOrDirectiveNode): PropTransformResult | undefined {
   if (
@@ -336,9 +344,59 @@ export function transformStaticProp(prop: VMSAttrOrDirectiveNode): PropTransform
 }
 
 /**
+ * 明确不支持的指令：报错而不是静默丢弃。
+ *
+ * 这些指令若被静默忽略，产物会"看起来正常"但缺失内容——例如
+ * `v-html="html"` 会产出空元素（内容彻底丢失）且不报任何错，
+ * 属于最难排查的一类问题。已在 README/SKILL 中列为不支持，
+ * 这里让编译期直接失败并说明替代方案。
+ */
+const UNSUPPORTED_DIRECTIVES: Record<string, string> = {
+  html: '小程序的富文本请使用 <rich-text nodes="{{...}}" /> 或 WXS 手动拼接',
+  text: '请直接使用插值 <text>{{ value }}</text>',
+  pre: '小程序模板无编译期插值概念，请直接书写静态文本',
+  once: '小程序天然不会重复渲染静态节点，可直接移除该指令',
+  memo: '小程序无 v-memo 等价机制，可直接移除该指令',
+  cloak: '小程序无 CSS 加载闪烁问题，可直接移除该指令',
+}
+
+function transformUnsupportedDirective(
+  prop: VMSAttrOrDirectiveNode,
+): PropTransformResult | undefined {
+  if (prop.type !== NodeTypes.DIRECTIVE) return undefined
+
+  // `v-bind="obj"`（无参数的整体绑定）：WXML 没有"展开对象为多个属性"的机制，
+  // 无法转换。旧实现静默丢弃**全部**属性——写了 v-bind="attrs" 的元素
+  // 最终一个属性都没有，且不报错，属于最难排查的一类问题。
+  // 注意：`:title="x"`（有参数）是正常用法，不受影响。
+  if (prop.name === 'bind' && !prop.arg) {
+    throw createCompileError(
+      'v-bind="obj"（整体绑定对象）不支持：WXML 无法把对象展开为多个属性，' +
+        '该写法会让所有动态属性被静默丢弃。请改为逐个绑定，如 :id="obj.id" :title="obj.title"。',
+      prop.loc,
+    )
+  }
+
+  // `v-on="handlers"`（无参数的整体事件绑定）同理：无法展开为多个 bind:xxx，
+  // 旧实现静默丢弃全部事件绑定，元素看起来正常但完全不可交互。
+  if (prop.name === 'on' && !prop.arg) {
+    throw createCompileError(
+      'v-on="handlers"（整体绑定事件）不支持：WXML 无法把对象展开为多个事件绑定，' +
+        '该写法会让所有事件被静默丢弃。请改为逐个绑定，如 @tap="handlers.tap"。',
+      prop.loc,
+    )
+  }
+
+  const advice = UNSUPPORTED_DIRECTIVES[prop.name]
+  if (!advice) return undefined
+  throw createCompileError(`v-${prop.name} 不支持：${advice}`, prop.loc)
+}
+
+/**
  * 所有属性转换器列表（按优先级排序）
  */
 export const propTransformers = [
+  transformUnsupportedDirective,
   transformVForProp,
   transformKeyProp,
   transformVIfProp,

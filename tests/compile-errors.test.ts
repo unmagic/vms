@@ -3,25 +3,6 @@ import { compileVueContent } from './test-utils'
 
 describe('编译错误边界测试', () => {
   describe('1. 不支持的特性应报错', () => {
-    it('1.1 作用域插槽应报编译错误', async () => {
-      const vueContent = `
-<template>
-  <MyList>
-    <template v-slot:item="{ item }">
-      <text>{{ item }}</text>
-    </template>
-  </MyList>
-</template>
-<script setup lang="ts">
-import MyList from './MyList.vue'
-</script>
-`
-      const { error } = await compileVueContent(vueContent)
-
-      expect(error).not.toBeNull()
-      expect(error?.message).toContain('作用域插槽')
-    })
-
     it('1.2 插槽下文本子节点应报错', async () => {
       const vueContent = `
 <template>

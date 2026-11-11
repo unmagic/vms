@@ -129,8 +129,13 @@ export function collectExternalVarsFromArgs(
       addProperty(returnValue, name)
       ctx.internalVars.add(name)
     } else if (t.isMemberExpression(node) || t.isOptionalMemberExpression(node)) {
-      // 只扫描 object 部分（根标识符）
+      // 扫描 object 部分（根标识符）
       scanNode(node.object)
+      // 计算成员（obj[expr]）的 property 是表达式，其中引用的外部变量同样需要收集，
+      // 否则会被当作未声明标识符留在产物中（运行时 ReferenceError）
+      if (node.computed) {
+        scanNode(node.property as t.Node)
+      }
     } else if (t.isObjectExpression(node)) {
       node.properties.forEach((prop) => {
         if (t.isObjectProperty(prop)) {
@@ -171,9 +176,27 @@ export function collectExternalVarsFromExpression(
       }
     } else if (t.isMemberExpression(node)) {
       collectVarsFromNode(node.object)
+      if (node.computed) collectVarsFromNode(node.property)
+    } else if (t.isOptionalMemberExpression(node)) {
+      collectVarsFromNode(node.object)
+      if (node.computed) collectVarsFromNode(node.property)
     } else if (t.isCallExpression(node)) {
       collectVarsFromNode(node.callee)
       node.arguments.forEach((arg) => collectVarsFromNode(arg as t.Node))
+    } else if (t.isAwaitExpression(node)) {
+      collectVarsFromNode(node.argument)
+    } else if (t.isObjectExpression(node)) {
+      node.properties.forEach((prop) => {
+        if (t.isObjectProperty(prop)) {
+          collectVarsFromNode(prop.value as t.Node)
+        } else if (t.isSpreadElement(prop)) {
+          collectVarsFromNode(prop.argument)
+        }
+      })
+    } else if (t.isArrayExpression(node)) {
+      node.elements.forEach((el) => el && collectVarsFromNode(el))
+    } else if (t.isTemplateLiteral(node)) {
+      node.expressions.forEach((e) => collectVarsFromNode(e as t.Node))
     } else if (t.isConditionalExpression(node)) {
       collectVarsFromNode(node.test)
       collectVarsFromNode(node.consequent)
@@ -182,6 +205,8 @@ export function collectExternalVarsFromExpression(
       collectVarsFromNode(node.left)
       collectVarsFromNode(node.right)
     } else if (t.isUnaryExpression(node)) {
+      collectVarsFromNode(node.argument)
+    } else if (t.isSpreadElement(node)) {
       collectVarsFromNode(node.argument)
     } else if (t.isAssignmentExpression(node)) {
       collectVarsFromNode(node.left)

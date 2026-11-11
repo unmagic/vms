@@ -42,8 +42,13 @@ export class ComponentMatcher {
 
     // 2. 检查前缀匹配
     if (this.isConfigPrefix && componentName.startsWith(this.prefix)) {
-      // 移除前缀并构造路径
-      const relativePath = componentName.slice(this.prefix.length)
+      // 移除前缀后必须还有实际组件名：
+      // 标签名恰好等于前缀（`t-`）或前缀后仅剩空白时，会构造出
+      // `tdesign-miniprogram//` 这类畸形路径，指向不存在的组件目录。
+      const relativePath = componentName.slice(this.prefix.length).trim()
+      if (!relativePath) {
+        return null
+      }
       const path = `${this.pathPrefix}/${relativePath}/${relativePath}`
       // 缓存到精确匹配中，避免后续重复计算
       this.exactMatches.set(componentName, path)

@@ -25,21 +25,72 @@
 
 以下 Vue 特性目前尚未支持，将在后续版本中逐步实现：
 
-| 特性                | 说明         | 替代方案                          |
-| ------------------- | ------------ | --------------------------------- |
-| `v-model`           | 双向绑定     | 使用 `:value` + `@input` 手动实现 |
-| `defineModel`       | 编译宏       | 使用 `props` + `emit` 手动实现    |
-| `useTemplateRef`    | 组合式函数   | 使用小程序 `selectComponent` API  |
-| `v-bind="obj"`      | 整体绑定对象 | 暂无支持计划                      |
-| `defineSlots`       | 编译宏       | 不支持                            |
-| 作用域插槽          | 插槽数据回传 | 难度大，排期优先级低              |
-| `<transition>`      | 过渡组件     | 不支持                            |
-| `<keep-alive>`      | 缓存组件     | 不支持                            |
-| `<Teleport>`        | 传送组件     | 不支持                            |
-| `<component :is>`   | 动态组件     | 暂不支持                          |
-| `v-html`            | 原始 HTML    | 不支持                            |
-| `useSlots`          | 组合式函数   | 不支持                            |
-| `v-once` / `v-memo` | 渲染优化     | 不支持                            |
+**下表所有项均为「编译报错」：写了会立即编译失败并给出替代方案，不会静默失效。**
+（唯一的例外是 TypeScript 类型层面的报错，见下方 \* 说明。）
+
+| 特性                            | 说明            | 行为       | 替代方案                                                                                                                |
+| ------------------------------- | --------------- | ---------- | ----------------------------------------------------------------------------------------------------------------------- |
+| `useTemplateRef`                | 组合式函数      | 类型报错\* | 使用小程序 `selectComponent` API                                                                                        |
+| `useSlots`                      | 组合式函数      | 类型报错\* | 不支持                                                                                                                  |
+| `defineSlots`                   | 编译宏          | 编译报错   | 小程序无插槽类型声明机制，可直接删除                                                                                    |
+| `withDefaults`                  | 编译宏          | 编译报错   | 使用响应式 Props 解构默认值（Vue 3.5+ 推荐）                                                                            |
+| `v-html`                        | 原始 HTML       | 编译报错   | `<rich-text nodes="{{...}}" />`                                                                                         |
+| `v-text`                        | 文本内容        | 编译报错   | `<text>{{ value }}</text>`                                                                                              |
+| `v-once` / `v-memo`             | 渲染优化        | 编译报错   | 小程序无需该优化，直接移除                                                                                              |
+| `v-cloak`                       | 防闪烁          | 编译报错   | 小程序无此问题，直接移除                                                                                                |
+| `<Teleport>`                    | 传送组件        | 编译报错   | 把内容直接写在目标位置                                                                                                  |
+| `<Transition>`                  | 过渡组件        | 编译报错   | CSS `transition`/`animation` 或 `wx.createAnimation`                                                                    |
+| `<KeepAlive>`                   | 缓存组件        | 编译报错   | 用 `wx:if` 配合状态保持                                                                                                 |
+| `<Suspense>`                    | 异步组件        | 编译报错   | VMS 为同步编译，可直接移除                                                                                              |
+| `<component :is>`               | 动态组件        | 编译报错   | 改用 `wx:if`/`wx:elif` 按条件渲染                                                                                       |
+| 内置组件小写变体                | `<teleport>` 等 | 编译报错   | 同上（与 Vue 的 `isCoreComponent` 判定一致）                                                                            |
+| `v-bind="obj"`                  | 整体绑定对象    | 编译报错   | WXML 无法展开对象，请逐个绑定 `:id="obj.id"`                                                                            |
+| `v-on="handlers"`               | 整体绑定事件    | 编译报错   | WXML 无法展开对象，请逐个绑定 `@tap="h.tap"`                                                                            |
+| `.prevent` `.`self` `.`once` 等 | 事件修饰符      | 编译报错   | 小程序事件无对应语义；见错误信息中的替代方案（`.stop`/`.mut`/`.capture`/`.capture-stop`/`.raw` **有映射，可正常使用**） |
+
+\* 组合式函数由 `@unmagic/vue-mini` 的类型声明覆盖：TypeScript 会在编译期报
+`has no exported member`。VMS 编译器不重复做 API 白名单校验——那会与运行时
+演进失配，且属重复实现类型检查。
+
+### v-model 双向绑定（已支持）
+
+支持原生表单标签（`input`/`textarea`/`switch`/`picker`/`slider`/`picker-view`/`radio-group`）和自定义组件的 `v-model` / `v-model:xxx`，包括 v-for 场景（通过 dataset 索引回写）：
+
+```vue
+<input v-model="text" />
+<MyComp v-model:title="title" />
+<input v-for="(item, index) in list" :key="item.id" v-model="item.name" />
+```
+
+支持的修饰符：`.number`（转数字）、`.trim`（去首尾空格），二者仅对 `input` / `textarea` 等字符串值标签及自定义组件有效。
+
+> **`.lazy` 暂不支持**：Vue 通过 `modelModifiers` 把修饰符传给子组件，由子组件决定何时 emit；VMS 尚无等价机制，父组件无法告知子组件延迟同步。因此 `.lazy` 目前会**编译报错**（而非静默忽略），原生标签与自定义组件均报错。如需延迟同步，请在子组件内部选择合适的时机触发 `update` 事件。
+
+> **限制**：`checkbox` / `checkbox-group` / `radio` 不支持 v-model（其 `detail.value` 是数组，与单值绑定语义不匹配），请使用 `:checked` + 事件手动处理。
+
+> **事件取值位置**：原生表单标签的 `v-model` 从 `e.detail.value` 取值；
+> **自定义组件**（含 `defineModel`）从 **`e.detail`** 取值——子组件通过
+> `triggerEvent(name, value)` 传值时，微信把第二个参数整体作为 detail。
+> 二者由编译器自动区分，无需手写处理。
+
+### defineModel 编译宏（已支持）
+
+子组件通过 `defineModel` 声明双向绑定属性（默认 prop 名为 `modelValue`，可传入自定义名），配合父组件的 `v-model` / `v-model:xxx` 使用：
+
+```vue
+<script setup lang="ts">
+const title = defineModel<string>('title')
+const rename = () => {
+  title.value = 'new'
+}
+</script>
+```
+
+### 插槽（默认 / 具名 / 作用域，含 v-for 场景）
+
+支持默认插槽、具名插槽和作用域插槽，可在 v-for 内向外层变量与插槽变量混合取值。
+
+> **注意**：作用域插槽基于 glass-easel 的 `dynamicSlots` 能力实现，需要在 `vms.config.js` 中开启 `glassEasel: true`（并要求基础库 >= 3.8.12），否则作用域插槽的数据传递不会生效。默认插槽与具名插槽无此依赖。
 
 ## 安装
 
@@ -99,6 +150,10 @@ export default {
 
   // 跳过 Babel 编译直接复制的文件规则
   copyOnly: [],
+
+  // 启用 glass-easel 组件框架（可选，默认 false）
+  // 需要微信基础库 >= 3.8.12；作用域插槽依赖此开关（dynamicSlots 能力）
+  glassEasel: false,
 }
 ```
 

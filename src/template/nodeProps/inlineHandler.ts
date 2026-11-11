@@ -426,6 +426,8 @@ export function rewriteExpressionVars(
   arrowFunctionArgumentNames: Set<string> | undefined,
   ctx: VMSTransformContext,
 ): t.Expression {
+  const propsVarName = ctx.scriptScope?.propsVarName || '__vmsProps'
+
   const processExpr = (node: t.Expression): t.Expression => {
     if (t.isIdentifier(node)) {
       const name = node.name
@@ -433,7 +435,6 @@ export function rewriteExpressionVars(
         return t.memberExpression(t.identifier(EVENT_PARAM_NAME), t.identifier('detail'))
       }
       if (ctx.scriptScope?.props.has(name)) {
-        const propsVarName = ctx.scriptScope.propsVarName || '__vmsProps'
         return t.memberExpression(t.identifier(propsVarName), t.identifier(name))
       }
       if (varsToCollect.has(name)) {
@@ -441,15 +442,58 @@ export function rewriteExpressionVars(
       }
       return node
     } else if (t.isMemberExpression(node)) {
-      return t.memberExpression(
+      // 计算成员（obj[expr]）的 property 是表达式，其中也可能引用需要改写的变量
+      // （如 map[key] 的 key 需改写为 __vmsProxyRefs.key）；非计算成员的
+      // property 是属性名，必须原样保留。
+      const property = node.computed ? processExpr(node.property as t.Expression) : node.property
+      return t.memberExpression(processExpr(node.object as t.Expression), property, node.computed)
+    } else if (t.isOptionalMemberExpression(node)) {
+      const property = node.computed ? processExpr(node.property as t.Expression) : node.property
+      return t.optionalMemberExpression(
         processExpr(node.object as t.Expression),
-        node.property,
+        property,
         node.computed,
+        node.optional,
       )
     } else if (t.isCallExpression(node)) {
       return t.callExpression(
         processExpr(node.callee as t.Expression),
-        node.arguments.map((arg) => processExpr(arg as t.Expression)),
+        node.arguments.map((arg) =>
+          t.isSpreadElement(arg) || t.isArgumentPlaceholder(arg)
+            ? arg
+            : (processExpr(arg as t.Expression) as t.Expression | t.SpreadElement),
+        ),
+      )
+    } else if (t.isAwaitExpression(node)) {
+      return t.awaitExpression(processExpr(node.argument as t.Expression))
+    } else if (t.isObjectExpression(node)) {
+      return t.objectExpression(
+        node.properties.map((prop) => {
+          if (t.isObjectProperty(prop)) {
+            return t.objectProperty(
+              prop.key,
+              processExpr(prop.value as t.Expression),
+              prop.computed,
+            )
+          }
+          if (t.isSpreadElement(prop)) {
+            return t.spreadElement(processExpr(prop.argument as t.Expression))
+          }
+          return prop
+        }),
+      )
+    } else if (t.isArrayExpression(node)) {
+      return t.arrayExpression(
+        node.elements.map((el) =>
+          el === null || t.isSpreadElement(el)
+            ? el
+            : (processExpr(el as t.Expression) as t.Expression | t.SpreadElement | null),
+        ),
+      )
+    } else if (t.isTemplateLiteral(node)) {
+      return t.templateLiteral(
+        node.quasis,
+        node.expressions.map((e) => processExpr(e as t.Expression)),
       )
     } else if (t.isConditionalExpression(node)) {
       return t.conditionalExpression(
@@ -466,7 +510,10 @@ export function rewriteExpressionVars(
         processExpr(node.right as t.Expression),
       )
     } else if (t.isUnaryExpression(node)) {
-      return t.unaryExpression(node.operator, processExpr(node.argument))
+      return t.unaryExpression(node.operator, processExpr(node.argument as unknown as t.Expression))
+    } else if (t.isUpdateExpression(node)) {
+      const processed = processExpr(node.argument as unknown as t.Expression)
+      return t.updateExpression(node.operator, processed, node.prefix)
     } else if (t.isAssignmentExpression(node)) {
       const left = node.left
       if (t.isIdentifier(left) || t.isMemberExpression(left)) {
@@ -476,6 +523,10 @@ export function rewriteExpressionVars(
         }
       }
       return t.assignmentExpression(node.operator, left as t.LVal, processExpr(node.right))
+    } else if (t.isTSAsExpression(node)) {
+      return t.tsAsExpression(processExpr(node.expression as t.Expression), node.typeAnnotation)
+    } else if (t.isTSNonNullExpression(node)) {
+      return t.tsNonNullExpression(processExpr(node.expression as t.Expression))
     }
     return node
   }

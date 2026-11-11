@@ -8,11 +8,12 @@ import type {
 import * as t from '@babel/types'
 import { generate } from '@babel/generator'
 import { traverse } from '@/utils/babelTraverse'
-import { getErrorMessage } from '@/utils/errorHandler'
+import { getErrorMessage, createCompileError } from '@/utils/errorHandler'
 import { createComponentExport } from '@/script/macro/expose'
 import { dealMacroEmits } from '@/script/macro/emits'
 import { dealMacroProps, replacePropsVariablesInAST } from '@/script/macro/props'
 import { dealMacroOptions } from '@/script/macro/options'
+import { dealMacroModel } from '@/script/macro/model'
 import { collectImports } from '@/script/collectImports'
 import { isImportVariable } from '@/script/scopeAnalyzer'
 import { type SFCDescriptor } from '@vue/compiler-sfc'
@@ -45,6 +46,38 @@ function checkSlotsUsage(templateAst: RootNode | undefined): boolean {
     }
   }
   return false
+}
+
+/**
+ * 未实现的编译宏：必须报错，否则会以"未定义函数"形式进入产物。
+ *
+ * 这些宏是 **编译期语法**，运行时并不存在对应函数。若编译器不处理它们，
+ * 产物中会保留 `withDefaults(defineProps<...>(), {...})` 这类调用，
+ * 小程序运行 setup 时立即抛 `withDefaults is not defined`；
+ * `defineSlots<{...}>()` 更会因保留 TS 泛型而产出**非法 JavaScript**，
+ * 小程序连文件都无法加载。
+ *
+ * 按"产物必须能在小程序环境运行"的原则，这里在编译期直接失败。
+ */
+const UNSUPPORTED_MACROS: Record<string, string> = {
+  withDefaults:
+    '请改用 Vue 3.5+ 的响应式 Props 解构默认值，如 const { a = "d" } = defineProps<...>()',
+  defineSlots: '小程序无插槽类型声明机制，可直接删除该调用',
+}
+
+function assertNoUnsupportedMacro(node: t.Node, locNode: t.Node): void {
+  let calleeName = ''
+  if (t.isCallExpression(node) && t.isIdentifier(node.callee)) {
+    calleeName = node.callee.name
+  } else if (t.isTSInstantiationExpression(node) && t.isIdentifier(node.expression)) {
+    // defineSlots<{...}>() 会被解析为 TSInstantiationExpression
+    calleeName = node.expression.name
+  }
+  if (!calleeName) return
+
+  const advice = UNSUPPORTED_MACROS[calleeName]
+  if (!advice) return
+  throw createCompileError(`${calleeName} 是编译期宏，VMS 尚未实现：${advice}`, locNode.loc ?? null)
 }
 
 /**
@@ -146,6 +179,9 @@ function extractSetupBodyUsingAST(
 
     VariableDeclaration(path) {
       const decl = path.node.declarations[0]
+      if (decl && decl.init) {
+        assertNoUnsupportedMacro(decl.init, decl)
+      }
       if (decl && decl.init && t.isCallExpression(decl.init)) {
         const calleeName = t.isIdentifier(decl.init.callee) ? decl.init.callee.name : ''
 
@@ -165,6 +201,10 @@ function extractSetupBodyUsingAST(
           case 'defineEmits':
             sfcContext.macroInfoList.push({ path, decl, type: 'defineEmits' })
             break
+
+          case 'defineModel':
+            sfcContext.macroInfoList.push({ path, decl, type: 'defineModel' })
+            break
         }
       }
     },
@@ -178,11 +218,34 @@ function extractSetupBodyUsingAST(
 
     ExpressionStatement(path) {
       const expression = path.node.expression
+      assertNoUnsupportedMacro(expression, path.node)
       if (t.isCallExpression(expression) && t.isIdentifier(expression.callee)) {
-        if (expression.callee.name === 'defineExpose') {
+        const callee = expression.callee.name
+        if (callee === 'defineExpose') {
           sfcContext.macroInfoList.push({ path, expression, type: 'defineExpose' })
-        } else if (expression.callee.name === 'defineOptions') {
+        } else if (callee === 'defineOptions') {
           sfcContext.macroInfoList.push({ path, expression, type: 'defineOptions' })
+        } else if (
+          callee === 'defineProps' ||
+          callee === 'defineEmits' ||
+          callee === 'defineModel'
+        ) {
+          // 这三个宏必须"接收其返回值"才有意义：编译器需要知道绑定到哪个变量，
+          // 才能生成 properties / emits / model，并把变量替换为运行时访问。
+          // 若写成裸调用语句（`defineProps<{...}>()`），此前会被静默跳过：
+          //   - props 未生成 → 产物里 `return { title }` 引用未声明变量
+          //   - 且该调用**原样保留**（含 TS 泛型）→ 产物是**非法 JavaScript**
+          // 属于"静默产出错误产物"，因此这里编译期直接报错。
+          throw createCompileError(
+            callee +
+              ' 必须接收其返回值：裸调用会让该宏被静默忽略并产出错误代码。' +
+              '请改为 const props = ' +
+              callee +
+              '(...) 或解构写法 const { x } = ' +
+              callee +
+              '(...)。',
+            path.node.loc ?? null,
+          )
         }
       }
     },
@@ -203,6 +266,20 @@ function extractSetupBodyUsingAST(
         // 使用已确定的contextVarName处理emits
         dealMacroEmits(item.path, item.decl, sfcContext.contextVarName)
         break
+      case 'defineModel': {
+        const handled = dealMacroModel(item.path, item.decl, sfcContext)
+        if (!handled) {
+          // 移除残留的宏调用，避免未定义标识符进入产物导致运行时崩溃
+          const loc = item.path.node.loc ?? null
+          item.path.remove()
+          throw createCompileError(
+            'defineModel 仅支持 defineModel()、defineModel("propName") 或 defineModel({ default: value }) 形式，' +
+              '暂不支持 get/set 转换器等 options',
+            loc,
+          )
+        }
+        break
+      }
       case 'defineExpose':
         sfcContext.exposeObject = createComponentExport(item.path, item.expression, returnValue)
         break
@@ -297,8 +374,12 @@ function extractSetupBodyUsingAST(
   const internalProperties: (t.ObjectProperty | t.ObjectMethod | t.SpreadElement)[] = []
   const importProperties: t.ObjectProperty[] = [] // 导入的变量，需要直接从模块作用域访问
 
-  // 如果有内联函数或 computed 绑定，需要添加 proxyRefs 支持
-  if (hasInlineFunctions || hasComputedBindings) {
+  // 需要生成 __vmsRenderState / __vmsInternalState / __vmsProxyRefs 的场景：
+  // - returnValue 中含 __fun_* 桥接函数（事件、v-model setter）
+  // - 含 computed 绑定
+  // - 其它路径显式要求 needsProxyRefs（如 v-model 在 v-for 内改写数据源后，
+  //   即使目标不是 v-for 变量，桥接函数仍会访问 __vmsProxyRefs）
+  if (hasInlineFunctions || hasComputedBindings || needsProxyRefs) {
     // 只在实际需要 __vmsProxyRefs 时才导入 proxyRefs
     if (needsProxyRefs) {
       ensureCoreImport(sfcContext, 'proxyRefs')
@@ -320,9 +401,18 @@ function extractSetupBodyUsingAST(
       }
     })
 
-    // 获取所有 props 变量名（包括解构的和 rest 的）
+    // 获取会被改写为 __vmsProps.xxx 的变量名。
+    //
+    // 只包含解构式 props 与 rest 变量：它们在模板/setter 中确实映射到
+    // __vmsProps.<originName>。defineModel 声明的变量（isDestructured: false）
+    // 在 setup 中是真实的 customRef 局部常量，必须保持 __vmsProxyRefs.xxx
+    // 访问，由 proxyRefs 解包写入 .value 并触发 triggerEvent。
+    // 若把 defineModel 变量也纳入改写，会生成 __vmsProps.<变量名>
+    // （既不是真实 property 名，也绕过了 customRef 的 setter）。
     const allPropsVarNames = new Set<string>([
-      ...sfcContext.propsVarsMap.keys(),
+      ...[...sfcContext.propsVarsMap]
+        .filter(([, info]) => info.isDestructured)
+        .map(([varName]) => varName),
       ...(sfcContext.propsVarRestName ? [sfcContext.propsVarRestName] : []),
     ])
 
@@ -504,6 +594,7 @@ export function parseScript(
   isPage: boolean = false,
   scriptScope?: ScriptScope,
   preParsedAst?: t.File | null,
+  hasDynamicSlots: boolean = false,
 ) {
   const scriptSetup = descriptor.scriptSetup
   const script = scriptSetup?.content
@@ -548,8 +639,12 @@ export function parseScript(
         t.identifier('properties'),
         t.objectExpression(
           [...sfcContext.propsVarsMap].map(([_aliasName, { defaultValue, originName }]) => {
+            // 属性名可能不是合法 JS 标识符（如 defineModel('user-name')），
+            // 此时必须生成字符串键 { "user-name": ... }，否则是语法错误
             return t.objectProperty(
-              t.identifier(originName),
+              t.isValidIdentifier(originName)
+                ? t.identifier(originName)
+                : t.stringLiteral(originName),
               t.objectExpression(
                 defaultValue
                   ? [
@@ -570,6 +665,9 @@ export function parseScript(
   const optionsProperties: t.ObjectProperty[] = []
   if (hasSlots) {
     optionsProperties.push(t.objectProperty(t.identifier('multipleSlots'), t.booleanLiteral(true)))
+  }
+  if (hasDynamicSlots) {
+    optionsProperties.push(t.objectProperty(t.identifier('dynamicSlots'), t.booleanLiteral(true)))
   }
   // 从 defineOptionsObject 中提取顶层 virtualHost，合并进 options
   let isPushVirtualHost = false
