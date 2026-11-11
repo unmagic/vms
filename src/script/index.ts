@@ -15,6 +15,11 @@ import { dealMacroProps, replacePropsVariablesInAST } from '@/script/macro/props
 import { dealMacroOptions } from '@/script/macro/options'
 import { collectImports } from '@/script/collectImports'
 import { isImportVariable } from '@/script/scopeAnalyzer'
+import {
+  analyzePageApiConfig,
+  createPageApiConfigProperties,
+  type PageApiConfigInfo,
+} from '@/script/pageApiConfig'
 import { type SFCDescriptor } from '@vue/compiler-sfc'
 import type { VMSSFCContext } from '@/types/node'
 import { ScriptScope } from '@/types/scope'
@@ -73,6 +78,7 @@ async function extractSetupBodyUsingAST(
   needsProxyRefs: boolean,
   isPage: boolean,
   scriptScope?: ScriptScope,
+  isTsScriptSetup: boolean = false,
 ) {
   let ast: t.File
   try {
@@ -96,6 +102,10 @@ async function extractSetupBodyUsingAST(
       },
     }
   }
+
+  // 检测当前 script 顶层是否使用了需要注入 defineComponent 配置的页面 API。
+  // 必须在 collectImports 移除 import 声明之前分析，否则无法确认函数来源。
+  const pageApiConfig: PageApiConfigInfo = isTsScriptSetup ? analyzePageApiConfig(ast.program) : {}
 
   // 创建一个空的 SFC setup上下文对象
   const sfcContext: VMSSFCContext = {
@@ -459,6 +469,7 @@ async function extractSetupBodyUsingAST(
   return {
     sfcContext,
     setupFunAst,
+    pageApiConfig,
   }
 }
 
@@ -474,12 +485,14 @@ export async function parseScript(
 ) {
   const scriptSetup = descriptor.scriptSetup
   const script = scriptSetup?.content
+  // 页面 API 配置注入仅支持 script setup lang="ts"
+  const isTsScriptSetup = (scriptSetup?.lang ?? '').toLowerCase() === 'ts'
 
   // 检查插槽使用
   const hasSlots = checkSlotsUsage(descriptor.template?.content)
 
   // 提取setup函数体
-  const { sfcContext, setupFunAst } = await extractSetupBodyUsingAST(
+  const { sfcContext, setupFunAst, pageApiConfig } = await extractSetupBodyUsingAST(
     script,
     returnValue,
     bridgedFunctions,
@@ -488,6 +501,7 @@ export async function parseScript(
     needsProxyRefs,
     isPage,
     scriptScope,
+    isTsScriptSetup,
   )
 
   // 生成import抽象语法
@@ -587,13 +601,19 @@ export async function parseScript(
     )
   }
   defineComponentParams.push(setupFunAst)
+
+  // 生成defineComponent第二个参数（vue-mini Config）：
+  // setup 中调用 onPageScroll / onShareAppMessage / onShareTimeline 时，
+  // 需要提前告知运行时注入对应的页面方法，否则这些钩子不会生效。
+  const defineComponentArgs: t.Expression[] = [t.objectExpression(defineComponentParams)]
+  const pageApiConfigProperties = createPageApiConfigProperties(pageApiConfig)
+  if (pageApiConfigProperties.length > 0) {
+    defineComponentArgs.push(t.objectExpression(pageApiConfigProperties))
+  }
+
   // 生成defineComponent抽象语法
   programBody.push(
-    t.expressionStatement(
-      t.callExpression(t.identifier('defineComponent'), [
-        t.objectExpression(defineComponentParams),
-      ]),
-    ),
+    t.expressionStatement(t.callExpression(t.identifier('defineComponent'), defineComponentArgs)),
   )
 
   return {
